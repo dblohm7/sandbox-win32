@@ -1,0 +1,184 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "sid.h"
+#include <aclapi.h>
+
+namespace mozilla {
+
+Sid Sid::sLogonId;
+Sid Sid::sAdministrators;
+Sid Sid::sLocalSystem;
+Sid Sid::sEveryone;
+Sid Sid::sRestricted;
+Sid Sid::sUsers;
+
+Sid::Sid()
+  :mSid(nullptr),
+   mSelfAllocated(false)
+{
+}
+
+Sid::~Sid()
+{
+  if (mSid) {
+    if (mSelfAllocated) {
+      ::free(mSid);
+    } else {
+      ::FreeSid(mSid);
+    }
+  }
+}
+
+bool
+Sid::Init(SID_IDENTIFIER_AUTHORITY aAuth, DWORD aRid0, DWORD aRid1, DWORD aRid2,
+          DWORD aRid3, DWORD aRid4, DWORD aRid5, DWORD aRid6, DWORD aRid7)
+{
+  if (mSid || !aRid0) return false;
+  BYTE numSubAuthorities = 1;
+  if (aRid1) ++numSubAuthorities;
+  if (aRid2) ++numSubAuthorities;
+  if (aRid3) ++numSubAuthorities;
+  if (aRid4) ++numSubAuthorities;
+  if (aRid5) ++numSubAuthorities;
+  if (aRid6) ++numSubAuthorities;
+  if (aRid7) ++numSubAuthorities;
+  BOOL result = ::AllocateAndInitializeSid(&aAuth, numSubAuthorities, aRid0,
+                                           aRid1, aRid2, aRid3, aRid4, aRid5,
+                                           aRid6, aRid7, &mSid);
+  return result ? true : false;
+}
+
+bool
+Sid::Init(WELL_KNOWN_SID_TYPE aSidType)
+{
+  PSID newSid = ::calloc(SECURITY_MAX_SID_SIZE, 1);
+  if (!newSid) {
+    return false;
+  }
+  DWORD newSidLen = SECURITY_MAX_SID_SIZE;
+  if (!::CreateWellKnownSid(aSidType, nullptr, newSid, &newSidLen)) {
+    ::free(newSid);
+    return false;
+  }
+  mSid = newSid;
+  mSelfAllocated = true;
+  return true;
+}
+
+bool
+Sid::Init(PSID aSid)
+{
+  if (mSid || !aSid || !::IsValidSid(aSid)) return false;
+  DWORD len = ::GetLengthSid(aSid);
+  PSID newSid = ::calloc(len, 1);
+  if (!::CopySid(len, newSid, aSid)) {
+    ::free(newSid);
+    return false;
+  }
+  mSid = newSid;
+  mSelfAllocated = true;
+  return true;
+}
+
+void
+Sid::GetTrustee(TRUSTEE& aTrustee)
+{
+  if (!mSid) {
+    return;
+  }
+  ::BuildTrusteeWithSid(&aTrustee, mSid);
+} 
+
+bool
+Sid::operator==(PSID aOther) const
+{
+  if (!IsValid() || !aOther || !::IsValidSid(aOther)) {
+    return false;
+  }
+  return !!::EqualSid(mSid, aOther);
+}
+
+bool
+Sid::operator==(const Sid& aOther) const
+{
+  if (!IsValid() || !aOther.IsValid()) {
+    return false;
+  }
+  return !!::EqualSid(mSid, aOther.mSid);
+}
+
+/* static */ Sid&
+Sid::GetLogonId()
+{
+  if (sLogonId.IsValid()) {
+    return sLogonId;
+  }
+  HANDLE token = NULL;
+  if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    TOKEN_USER userInfo;
+    ::memset(&userInfo, 0, sizeof(userInfo));
+    if (::GetTokenInformation(token, TokenUser, &userInfo, sizeof(userInfo),
+                              nullptr)) {
+      sLogonId.Init(userInfo.User.Sid);
+    }
+    ::CloseHandle(token);
+  }
+  return sLogonId;
+}
+
+/* static */ Sid&
+Sid::GetAdministrators()
+{
+  if (sAdministrators.IsValid()) {
+    return sAdministrators;
+  }
+  sAdministrators.Init(WinBuiltinAdministratorsSid);
+  return sAdministrators;
+}
+
+/* static */ Sid&
+Sid::GetLocalSystem()
+{
+  if (sLocalSystem.IsValid()) {
+    return sLocalSystem;
+  }
+  sLocalSystem.Init(WinLocalSystemSid);
+  return sLocalSystem;
+}
+
+/* static */ Sid&
+Sid::GetEveryone()
+{
+  if (sEveryone.IsValid()) {
+    return sEveryone;
+  }
+  sEveryone.Init(WinWorldSid);
+  return sEveryone;
+}
+
+/* static */ Sid&
+Sid::GetRestricted()
+{
+  if (sRestricted.IsValid()) {
+    return sRestricted;
+  }
+  sRestricted.Init(WinRestrictedCodeSid);
+  return sRestricted;
+}
+
+/* static */ Sid&
+Sid::GetUsers()
+{
+  if (sUsers.IsValid()) {
+    return sUsers;
+  }
+  sUsers.Init(WinBuiltinUsersSid);
+  return sUsers;
+}
+
+} // namespace mozilla
+
