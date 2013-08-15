@@ -18,13 +18,13 @@ public:
   Sid();
   ~Sid();
 
-  bool Init(SID_IDENTIFIER_AUTHORITY aAuth, DWORD aRid0, DWORD aRid1 = 0,
+  bool Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1 = 0,
             DWORD aRid2 = 0, DWORD aRid3 = 0, DWORD aRid4 = 0, DWORD aRid5 = 0,
             DWORD aRid6 = 0, DWORD aRid7 = 0);
-
   bool Init(WELL_KNOWN_SID_TYPE aSidType);
-
   bool Init(PSID aSid);
+
+  bool InitCustom();
 
   bool IsValid() const { return !!mSid; }
   void GetTrustee(TRUSTEE& aTrustee);
@@ -39,6 +39,11 @@ public:
   static Sid& GetEveryone();
   static Sid& GetRestricted();
   static Sid& GetUsers();
+  static Sid& GetIntegrityUntrusted();
+  static Sid& GetIntegrityLow();
+  static Sid& GetIntegrityMedium();
+  static Sid& GetIntegrityHigh();
+  static Sid& GetIntegritySystem();
 
 private:
   PSID          mSid;
@@ -50,6 +55,11 @@ private:
   static Sid sEveryone;
   static Sid sRestricted;
   static Sid sUsers;
+  static Sid sIntegrityUntrusted;
+  static Sid sIntegrityLow;
+  static Sid sIntegrityMedium;
+  static Sid sIntegrityHigh;
+  static Sid sIntegritySystem;
 };
 
 } // namespace mozilla

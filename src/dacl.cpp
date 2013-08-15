@@ -58,16 +58,27 @@ Dacl::AddAce(Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask)
 
 Dacl::operator PACL()
 {
-  if (mAcl && !mModified) {
+  if (!mModified) {
     return mAcl;
   }
-  Clear();
-  DWORD err = ::SetEntriesInAcl((ULONG)mAces.size(), &mAces[0], nullptr, &mAcl);
-  if (ERROR_SUCCESS != err) {
+  if (!Merge(mAcl)) {
     return nullptr;
   }
-  mModified = false;
   return mAcl;
+}
+
+bool
+Dacl::Merge(PACL aAcl)
+{
+  PACL newAcl = nullptr;
+  DWORD err = ::SetEntriesInAcl((ULONG)mAces.size(), &mAces[0], aAcl, &newAcl);
+  if (ERROR_SUCCESS != err) {
+    return false;
+  }
+  Clear();
+  mAcl = newAcl;
+  mModified = false;
+  return true;
 }
 
 } // namespace mozilla

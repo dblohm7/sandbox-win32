@@ -11,6 +11,7 @@
 #define _WIN32_WINNT 0x0600
 #include <windows.h>
 #include <sddl.h>
+#include <shlobj.h>
 
 #include "dacl.h"
 #include "sid.h"
@@ -25,19 +26,62 @@ using std::hex;
 const wchar_t CMD_OPT_SANDBOXED[] = L"--sandboxed";
 wchar_t DESKTOP_NAME[] = L"moz-sandbox";
 
-bool InitSandbox(wchar_t* aLibraryPath, wchar_t* aPrivToken)
+class WindowsSandbox
 {
-  wistringstream iss(aPrivToken);
-  HANDLE privToken = NULL;
-  iss >> privToken;
-  if (!iss) {
+public:
+  WindowsSandbox() {}
+  virtual ~WindowsSandbox() {}
+
+  bool Init(HANDLE aPrivilegedToken);
+  void Fini();
+
+protected:
+  virtual bool OnPrivInit() = 0;
+  virtual bool OnInit() = 0;
+  virtual void OnFini() = 0;
+
+private:
+};
+
+bool
+WindowsSandbox::Init(HANDLE aPrivilegedToken)
+{
+  if (!aPrivilegedToken) {
     return false;
   }
-  if (!ImpersonateLoggedOnUser(privToken)) {
+  if (!::ImpersonateLoggedOnUser(aPrivilegedToken)) {
     return false;
   }
-  return true;
+  bool ok = OnPrivInit();
+  ok = ::RevertToSelf() && ok;
+  ::CloseHandle(aPrivilegedToken);
+  if (!ok) {
+    return ok;
+  }
+  return OnInit();
 }
+
+void
+WindowsSandbox::Fini()
+{
+  OnFini();
+}
+
+class PrototypeSandbox : public WindowsSandbox
+{
+public:
+  explicit PrototypeSandbox(const wchar_t *aLibPath)
+    :mLibPath(aLibPath)
+  {}
+  virtual ~PrototypeSandbox() {}
+
+protected:
+  virtual bool OnPrivInit() { return true; }
+  virtual bool OnInit() { return true; }
+  virtual void OnFini() {}
+private:
+  const wchar_t* mLibPath;
+};
 
 PTOKEN_GROUPS CreateSidsToDisable(HANDLE aToken, std::vector<SID_AND_ATTRIBUTES>& aOut, mozilla::Sid& aLogonSid)
 {
@@ -100,10 +144,16 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(processToken);
     return false;
   }
+  // customSid guards against the SetThreadDesktop() security hole
+  mozilla::Sid customSid;
+  if (!customSid.InitCustom()) {
+    return false;
+  }
   SID_AND_ATTRIBUTES toRestrict[] = {{mozilla::Sid::GetEveryone()},
                                      {mozilla::Sid::GetUsers()},
                                      {mozilla::Sid::GetRestricted()},
-                                     {logonSid}};
+                                     {logonSid},
+                                     {customSid}};
   HANDLE restrictedToken = NULL;
   bool result = !!CreateRestrictedToken(processToken, DISABLE_MAX_PRIVILEGE,
                                         toDisable.size(), &toDisable[0], 0,
@@ -131,9 +181,108 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   dacl.AddAllowedAce(mozilla::Sid::GetAdministrators(), GENERIC_ALL);
   dacl.AddAllowedAce(logonSid, GENERIC_ALL);
   TOKEN_DEFAULT_DACL tokenDacl;
+  ZeroMemory(&tokenDacl, sizeof(tokenDacl));
   tokenDacl.DefaultDacl = (PACL)dacl;
   if (!SetTokenInformation(restrictedToken, TokenDefaultDacl, &tokenDacl,
                            sizeof(tokenDacl))) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  TOKEN_MANDATORY_LABEL il;
+  ZeroMemory(&il, sizeof(il));
+  il.Label.Sid = mozilla::Sid::GetIntegrityLow();
+  if (!SetTokenInformation(restrictedToken, TokenIntegrityLevel, &il, 
+                           sizeof(il))) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  HDESK curDesktop = GetThreadDesktop(GetCurrentThreadId());
+  if (!curDesktop) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  SECURITY_INFORMATION curDesktopSecInfo = DACL_SECURITY_INFORMATION;
+  PSECURITY_DESCRIPTOR curDesktopSd = nullptr;
+  DWORD curDesktopSdSize = 0;
+  if (!GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
+                             curDesktopSdSize, &curDesktopSdSize) &&
+                             GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  curDesktopSd = (PSECURITY_DESCRIPTOR) calloc(curDesktopSdSize, 1);
+  if (!GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
+        curDesktopSdSize, &curDesktopSdSize)) {
+    free(curDesktopSd);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  // Convert from self-relative to absolute
+  DWORD curDesktopDaclSize = 0;
+  DWORD curDesktopSaclSize = 0;
+  DWORD curDesktopOwnerSize = 0;
+  DWORD curDesktopPrimaryGroupSize = 0;
+  if(!MakeAbsoluteSD(curDesktopSd, nullptr, &curDesktopSdSize,
+                     nullptr, &curDesktopDaclSize, nullptr,
+                     &curDesktopSaclSize, nullptr, &curDesktopOwnerSize,
+                     nullptr, &curDesktopPrimaryGroupSize) &&
+     GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    free(curDesktopSd);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  PSECURITY_DESCRIPTOR newDesktopSd = (PSECURITY_DESCRIPTOR) calloc(curDesktopSdSize, 1);
+  PACL curDesktopDacl = (PACL) calloc(curDesktopDaclSize, 1);
+  PACL curDesktopSacl = (PACL) calloc(curDesktopSaclSize, 1);
+  PSID curDesktopOwner = (PSID) calloc(curDesktopOwnerSize, 1);
+  PSID curDesktopPrimaryGroup = (PSID) calloc(curDesktopPrimaryGroupSize, 1);
+  result = !!MakeAbsoluteSD(curDesktopSd, newDesktopSd, &curDesktopSdSize,
+                            curDesktopDacl, &curDesktopDaclSize, curDesktopSacl,
+                            &curDesktopSaclSize, curDesktopOwner,
+                            &curDesktopOwnerSize, curDesktopPrimaryGroup,
+                            &curDesktopPrimaryGroupSize);
+  free(curDesktopSd); curDesktopSd = nullptr;
+  if (!result) {
+    free(curDesktopDacl);
+    free(curDesktopSacl);
+    free(curDesktopOwner);
+    free(curDesktopPrimaryGroup);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  mozilla::Dacl newDesktopDacl;
+  newDesktopDacl.AddDeniedAce(customSid, GENERIC_ALL);
+  result = newDesktopDacl.Merge(curDesktopDacl);
+  free(curDesktopDacl); curDesktopDacl = nullptr;
+  if (!result) {
+    free(curDesktopSacl);
+    free(curDesktopOwner);
+    free(curDesktopPrimaryGroup);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  if (!SetSecurityDescriptorDacl(newDesktopSd, TRUE, newDesktopDacl, FALSE)) {
+    free(curDesktopSacl);
+    free(curDesktopOwner);
+    free(curDesktopPrimaryGroup);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  result = !!SetUserObjectSecurity(curDesktop, &curDesktopSecInfo,
+                                   newDesktopSd);
+  free(curDesktopSacl); curDesktopSacl = nullptr;
+  free(curDesktopOwner); curDesktopOwner = nullptr;
+  free(curDesktopPrimaryGroup); curDesktopPrimaryGroup = nullptr;
+  if (!result) {
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     return false;
@@ -153,8 +302,18 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   oss << aLibraryPath;
   oss << L" ";
   oss << hex << impersonationToken;
-  wchar_t tmpPath[MAX_PATH + 1] = {0};
-  if (!GetTempPath(sizeof(tmpPath)/sizeof(tmpPath[0]), tmpPath)) {
+  /*
+  wchar_t workingDir[MAX_PATH + 1] = {0};
+  if (!GetTempPath(sizeof(workingDir)/sizeof(workingDir[0]), workingDir)) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  */
+  // NOTE: SHGetKnownFolderPath is Vista-specific
+  PWSTR workingDir = nullptr;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0,
+                                  restrictedToken, &workingDir))) {
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     return false;
@@ -165,6 +324,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
       GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
+    CoTaskMemFree(workingDir);
     return false;
   }
   LPPROC_THREAD_ATTRIBUTE_LIST attrList = (LPPROC_THREAD_ATTRIBUTE_LIST)calloc(attrListSize, 1);
@@ -172,6 +332,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     free(attrList);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
+    CoTaskMemFree(workingDir);
     return false;
   }
   if (!UpdateProcThreadAttribute(attrList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
@@ -180,23 +341,25 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     free(attrList);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
+    CoTaskMemFree(workingDir);
     return false;
   }
-  // TODO ASK: Low integrity
   STARTUPINFOEX siex;
   ZeroMemory(&siex, sizeof(siex));
   siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
-  siex.StartupInfo.lpDesktop = DESKTOP_NAME;
+  // TODO ASK: Low integrity fails on separate desktop
+  // siex.StartupInfo.lpDesktop = DESKTOP_NAME;
   siex.lpAttributeList = attrList;
   PROCESS_INFORMATION procInfo;
   result = !!CreateProcessAsUser(restrictedToken, aExecutablePath,
                                  const_cast<wchar_t*>(oss.str().c_str()), &sa,
                                  &sa, TRUE, EXTENDED_STARTUPINFO_PRESENT, L"",
-                                 tmpPath, &siex.StartupInfo, &procInfo);
+                                 workingDir, &siex.StartupInfo, &procInfo);
   DeleteProcThreadAttributeList(attrList);
   free(attrList);
   CloseHandle(impersonationToken);
   CloseHandle(restrictedToken);
+  CoTaskMemFree(workingDir);
   if (result) {
     CloseHandle(procInfo.hThread);
     WaitForSingleObject(procInfo.hProcess, INFINITE);
@@ -208,7 +371,14 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
 int wmain(int argc, wchar_t* argv[])
 {
   if (argc == 4 && !wcsicmp(argv[1], CMD_OPT_SANDBOXED)) {
-    if (!InitSandbox(argv[2], argv[3])) {
+    wistringstream iss(argv[3]);
+    HANDLE privToken = NULL;
+    iss >> privToken;
+    if (!iss) {
+      return false;
+    }
+    PrototypeSandbox sb(argv[2]);
+    if (!sb.Init(privToken)) {
       return EXIT_FAILURE;
     }
   } else if (argc == 2) {

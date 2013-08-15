@@ -15,6 +15,11 @@ Sid Sid::sLocalSystem;
 Sid Sid::sEveryone;
 Sid Sid::sRestricted;
 Sid Sid::sUsers;
+Sid Sid::sIntegrityUntrusted;
+Sid Sid::sIntegrityLow;
+Sid Sid::sIntegrityMedium;
+Sid Sid::sIntegrityHigh;
+Sid Sid::sIntegritySystem;
 
 Sid::Sid()
   :mSid(nullptr),
@@ -34,7 +39,7 @@ Sid::~Sid()
 }
 
 bool
-Sid::Init(SID_IDENTIFIER_AUTHORITY aAuth, DWORD aRid0, DWORD aRid1, DWORD aRid2,
+Sid::Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1, DWORD aRid2,
           DWORD aRid3, DWORD aRid4, DWORD aRid5, DWORD aRid6, DWORD aRid7)
 {
   if (mSid || !aRid0) return false;
@@ -82,6 +87,28 @@ Sid::Init(PSID aSid)
   mSid = newSid;
   mSelfAllocated = true;
   return true;
+}
+
+bool
+Sid::InitCustom()
+{
+  UUID uuid;
+  if (::UuidCreate(&uuid) != RPC_S_OK) {
+    return false;
+  }
+  DWORD subAuth[4];
+  subAuth[0] = uuid.Data1;
+  subAuth[1] = (uuid.Data2 << 16) | uuid.Data3;
+  subAuth[2] = (uuid.Data4[0] << 24) |
+               (uuid.Data4[1] << 16) |
+               (uuid.Data4[2] << 8) |
+               uuid.Data4[3];
+  subAuth[3] = (uuid.Data4[4] << 24) |
+               (uuid.Data4[5] << 16) |
+               (uuid.Data4[6] << 8) |
+               uuid.Data4[7];
+  SID_IDENTIFIER_AUTHORITY auth = SECURITY_RESOURCE_MANAGER_AUTHORITY;
+  return Init(auth, subAuth[0], subAuth[1], subAuth[2], subAuth[3]);
 }
 
 void
@@ -178,6 +205,56 @@ Sid::GetUsers()
   }
   sUsers.Init(WinBuiltinUsersSid);
   return sUsers;
+}
+
+/* static */ Sid&
+Sid::GetIntegrityUntrusted()
+{
+  if (sIntegrityUntrusted.IsValid()) {
+    return sIntegrityUntrusted;
+  }
+  sIntegrityUntrusted.Init(WinUntrustedLabelSid);
+  return sIntegrityUntrusted;
+}
+
+/* static */ Sid&
+Sid::GetIntegrityLow()
+{
+  if (sIntegrityLow.IsValid()) {
+    return sIntegrityLow;
+  }
+  sIntegrityLow.Init(WinLowLabelSid);
+  return sIntegrityLow;
+}
+
+/* static */ Sid&
+Sid::GetIntegrityMedium()
+{
+  if (sIntegrityMedium.IsValid()) {
+    return sIntegrityMedium;
+  }
+  sIntegrityMedium.Init(WinMediumLabelSid);
+  return sIntegrityMedium;
+}
+
+/* static */ Sid&
+Sid::GetIntegrityHigh()
+{
+  if (sIntegrityHigh.IsValid()) {
+    return sIntegrityHigh;
+  }
+  sIntegrityHigh.Init(WinHighLabelSid);
+  return sIntegrityHigh;
+}
+
+/* static */ Sid&
+Sid::GetIntegritySystem()
+{
+  if (sIntegritySystem.IsValid()) {
+    return sIntegritySystem;
+  }
+  sIntegritySystem.Init(WinSystemLabelSid);
+  return sIntegritySystem;
 }
 
 } // namespace mozilla

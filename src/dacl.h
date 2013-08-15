@@ -26,6 +26,7 @@ public:
 
   void AddAllowedAce(Sid& aSid, ACCESS_MASK aAccessMask);
   void AddDeniedAce(Sid& aSid, ACCESS_MASK aAccessMask);
+  bool Merge(PACL aAcl);
 
   operator PACL();
 
