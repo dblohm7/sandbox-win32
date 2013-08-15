@@ -189,6 +189,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
+#if defined(USE_LOW_INTEGRITY)
   TOKEN_MANDATORY_LABEL il;
   ZeroMemory(&il, sizeof(il));
   il.Label.Sid = mozilla::Sid::GetIntegrityLow();
@@ -198,6 +199,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
+#endif // defined(USE_LOW_INTEGRITY)
   HDESK curDesktop = GetThreadDesktop(GetCurrentThreadId());
   if (!curDesktop) {
     CloseHandle(restrictedToken);
@@ -247,8 +249,8 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
                             &curDesktopSaclSize, curDesktopOwner,
                             &curDesktopOwnerSize, curDesktopPrimaryGroup,
                             &curDesktopPrimaryGroupSize);
-  free(curDesktopSd); curDesktopSd = nullptr;
   if (!result) {
+    free(curDesktopSd);
     free(curDesktopDacl);
     free(curDesktopSacl);
     free(curDesktopOwner);
@@ -262,6 +264,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   result = newDesktopDacl.Merge(curDesktopDacl);
   free(curDesktopDacl); curDesktopDacl = nullptr;
   if (!result) {
+    free(curDesktopSd);
     free(curDesktopSacl);
     free(curDesktopOwner);
     free(curDesktopPrimaryGroup);
@@ -270,6 +273,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     return false;
   }
   if (!SetSecurityDescriptorDacl(newDesktopSd, TRUE, newDesktopDacl, FALSE)) {
+    free(curDesktopSd);
     free(curDesktopSacl);
     free(curDesktopOwner);
     free(curDesktopPrimaryGroup);
@@ -283,12 +287,19 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   free(curDesktopOwner); curDesktopOwner = nullptr;
   free(curDesktopPrimaryGroup); curDesktopPrimaryGroup = nullptr;
   if (!result) {
+    free(curDesktopSd);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     return false;
   }
+  // A default security descriptor won't cut it for the new desktop; it must
+  // be adjusted to permit low integrity
+  SECURITY_ATTRIBUTES newDesktopSa = {sizeof(newDesktopSa), curDesktopSd, FALSE};
   // TODO ASK: We shouldn't have 1:1 desktop-to-sandbox ratio (they eat memory)
-  HDESK desktop = CreateDesktop(DESKTOP_NAME, nullptr, nullptr, 0, DESKTOP_CREATEWINDOW /* required */, /* TODO: Security descriptor? */ nullptr);
+  HDESK desktop = CreateDesktop(DESKTOP_NAME, nullptr, nullptr, 0,
+                                DESKTOP_CREATEWINDOW /* required */,
+                                &newDesktopSa);
+  free(curDesktopSd); curDesktopSd = nullptr;
   if (!desktop) {
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
@@ -347,8 +358,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   STARTUPINFOEX siex;
   ZeroMemory(&siex, sizeof(siex));
   siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
-  // TODO ASK: Low integrity fails on separate desktop
-  // siex.StartupInfo.lpDesktop = DESKTOP_NAME;
+  siex.StartupInfo.lpDesktop = DESKTOP_NAME;
   siex.lpAttributeList = attrList;
   PROCESS_INFORMATION procInfo;
   result = !!CreateProcessAsUser(restrictedToken, aExecutablePath,
