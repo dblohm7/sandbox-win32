@@ -41,7 +41,25 @@ protected:
   virtual void OnFini() = 0;
 
 private:
+  bool DropProcessIntegrityLevel();
 };
+
+bool
+WindowsSandbox::DropProcessIntegrityLevel()
+{
+  HANDLE processToken = NULL;
+  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_DEFAULT,
+                          &processToken)) {
+    return false;
+  }
+  TOKEN_MANDATORY_LABEL il;
+  ZeroMemory(&il, sizeof(il));
+  il.Label.Sid = mozilla::Sid::GetIntegrityLow();
+  bool result = !!::SetTokenInformation(processToken, TokenIntegrityLevel,
+                                        &il, sizeof(il));
+  ::CloseHandle(processToken);
+  return result;
+}
 
 bool
 WindowsSandbox::Init(HANDLE aPrivilegedToken, HANDLE aJob)
@@ -55,6 +73,7 @@ WindowsSandbox::Init(HANDLE aPrivilegedToken, HANDLE aJob)
   bool ok = OnPrivInit();
   ok = ::RevertToSelf() && ok;
   ::CloseHandle(aPrivilegedToken);
+  ok = DropProcessIntegrityLevel() && ok;
   ok = ::AssignProcessToJobObject(aJob, ::GetCurrentProcess()) && ok;
   ::CloseHandle(aJob);
   if (!ok) {
@@ -187,15 +206,6 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   tokenDacl.DefaultDacl = (PACL)dacl;
   if (!SetTokenInformation(restrictedToken, TokenDefaultDacl, &tokenDacl,
                            sizeof(tokenDacl))) {
-    CloseHandle(restrictedToken);
-    CloseHandle(impersonationToken);
-    return false;
-  }
-  TOKEN_MANDATORY_LABEL il;
-  ZeroMemory(&il, sizeof(il));
-  il.Label.Sid = mozilla::Sid::GetIntegrityLow();
-  if (!SetTokenInformation(restrictedToken, TokenIntegrityLevel, &il, 
-                           sizeof(il))) {
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     return false;

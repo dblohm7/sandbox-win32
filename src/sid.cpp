@@ -60,11 +60,12 @@ Sid::Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1, DWORD aRid2
 bool
 Sid::Init(WELL_KNOWN_SID_TYPE aSidType)
 {
-  PSID newSid = ::calloc(SECURITY_MAX_SID_SIZE, 1);
-  if (!newSid) {
+  DWORD newSidLen = 0;
+  if (!::CreateWellKnownSid(aSidType, nullptr, nullptr, &newSidLen) &&
+      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
-  DWORD newSidLen = SECURITY_MAX_SID_SIZE;
+  PSID newSid = (PSID) ::calloc(newSidLen, 1);
   if (!::CreateWellKnownSid(aSidType, nullptr, newSid, &newSidLen)) {
     ::free(newSid);
     return false;
