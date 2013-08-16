@@ -32,7 +32,7 @@ public:
   WindowsSandbox() {}
   virtual ~WindowsSandbox() {}
 
-  bool Init(HANDLE aPrivilegedToken);
+  bool Init(HANDLE aPrivilegedToken, HANDLE aJob);
   void Fini();
 
 protected:
@@ -44,7 +44,7 @@ private:
 };
 
 bool
-WindowsSandbox::Init(HANDLE aPrivilegedToken)
+WindowsSandbox::Init(HANDLE aPrivilegedToken, HANDLE aJob)
 {
   if (!aPrivilegedToken) {
     return false;
@@ -55,6 +55,8 @@ WindowsSandbox::Init(HANDLE aPrivilegedToken)
   bool ok = OnPrivInit();
   ok = ::RevertToSelf() && ok;
   ::CloseHandle(aPrivilegedToken);
+  ok = ::AssignProcessToJobObject(aJob, ::GetCurrentProcess()) && ok;
+  ::CloseHandle(aJob);
   if (!ok) {
     return ok;
   }
@@ -189,7 +191,6 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
-#if defined(USE_LOW_INTEGRITY)
   TOKEN_MANDATORY_LABEL il;
   ZeroMemory(&il, sizeof(il));
   il.Label.Sid = mozilla::Sid::GetIntegrityLow();
@@ -199,7 +200,6 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
-#endif // defined(USE_LOW_INTEGRITY)
   HDESK curDesktop = GetThreadDesktop(GetCurrentThreadId());
   if (!curDesktop) {
     CloseHandle(restrictedToken);
@@ -207,6 +207,8 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     return false;
   }
   SECURITY_INFORMATION curDesktopSecInfo = DACL_SECURITY_INFORMATION;
+  // TODO ASK: If Vista+
+  curDesktopSecInfo |= LABEL_SECURITY_INFORMATION;
   PSECURITY_DESCRIPTOR curDesktopSd = nullptr;
   DWORD curDesktopSdSize = 0;
   if (!GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
@@ -281,6 +283,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
+  curDesktopSecInfo = DACL_SECURITY_INFORMATION;
   result = !!SetUserObjectSecurity(curDesktop, &curDesktopSecInfo,
                                    newDesktopSd);
   free(curDesktopSacl); curDesktopSacl = nullptr;
@@ -305,6 +308,43 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     CloseHandle(impersonationToken);
     return false;
   }
+  SECURITY_ATTRIBUTES jobSa = {sizeof(jobSa), nullptr, TRUE};
+  HANDLE job = CreateJobObject(&jobSa, nullptr);
+  if (!job) {
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  JOBOBJECT_BASIC_LIMIT_INFORMATION basicLimits;
+  ZeroMemory(&basicLimits, sizeof(basicLimits));
+  // Block CreateProcess
+  basicLimits.LimitFlags = JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+  basicLimits.ActiveProcessLimit = 1;
+  if (!SetInformationJobObject(job, JobObjectBasicLimitInformation, &basicLimits,
+                               sizeof(basicLimits))) {
+    CloseHandle(job);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
+  JOBOBJECT_BASIC_UI_RESTRICTIONS uiLimits;
+  ZeroMemory(&uiLimits, sizeof(uiLimits));
+  // To explicitly grant user handles, call UserHandleGrantAccess
+  uiLimits.UIRestrictionsClass = JOB_OBJECT_UILIMIT_DESKTOP |
+                                 JOB_OBJECT_UILIMIT_DISPLAYSETTINGS |
+                                 JOB_OBJECT_UILIMIT_EXITWINDOWS |
+                                 JOB_OBJECT_UILIMIT_GLOBALATOMS | 
+                                 JOB_OBJECT_UILIMIT_HANDLES |
+                                 JOB_OBJECT_UILIMIT_READCLIPBOARD |
+                                 JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS |
+                                 JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+  if (!SetInformationJobObject(job, JobObjectBasicUIRestrictions, &uiLimits,
+                               sizeof(uiLimits))) {
+    CloseHandle(job);
+    CloseHandle(restrictedToken);
+    CloseHandle(impersonationToken);
+    return false;
+  }
   wostringstream oss;
   oss << aExecutablePath;
   oss << L" ";
@@ -313,6 +353,8 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   oss << aLibraryPath;
   oss << L" ";
   oss << hex << impersonationToken;
+  oss << L" ";
+  oss << hex << job;
   /*
   wchar_t workingDir[MAX_PATH + 1] = {0};
   if (!GetTempPath(sizeof(workingDir)/sizeof(workingDir[0]), workingDir)) {
@@ -325,6 +367,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   PWSTR workingDir = nullptr;
   if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0,
                                   restrictedToken, &workingDir))) {
+    CloseHandle(job);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     return false;
@@ -333,6 +376,7 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   SIZE_T attrListSize = 0;
   if (!InitializeProcThreadAttributeList(nullptr, 1, 0, &attrListSize) &&
       GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    CloseHandle(job);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     CoTaskMemFree(workingDir);
@@ -341,15 +385,18 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   LPPROC_THREAD_ATTRIBUTE_LIST attrList = (LPPROC_THREAD_ATTRIBUTE_LIST)calloc(attrListSize, 1);
   if (!InitializeProcThreadAttributeList(attrList, 1, 0, &attrListSize)) {
     free(attrList);
+    CloseHandle(job);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     CoTaskMemFree(workingDir);
     return false;
   }
+  HANDLE inheritableHandles[] = {impersonationToken, job};
   if (!UpdateProcThreadAttribute(attrList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                 &impersonationToken, sizeof(HANDLE), nullptr,
-                                 nullptr)) {
+                                 inheritableHandles, sizeof(inheritableHandles),
+                                 nullptr, nullptr)) {
     free(attrList);
+    CloseHandle(job);
     CloseHandle(restrictedToken);
     CloseHandle(impersonationToken);
     CoTaskMemFree(workingDir);
@@ -360,11 +407,14 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
   siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
   siex.StartupInfo.lpDesktop = DESKTOP_NAME;
   siex.lpAttributeList = attrList;
+  DWORD creationFlags = EXTENDED_STARTUPINFO_PRESENT;
+  // TODO ASK: If less than Windows 8
+  creationFlags |= CREATE_BREAKAWAY_FROM_JOB;
   PROCESS_INFORMATION procInfo;
   result = !!CreateProcessAsUser(restrictedToken, aExecutablePath,
                                  const_cast<wchar_t*>(oss.str().c_str()), &sa,
-                                 &sa, TRUE, EXTENDED_STARTUPINFO_PRESENT, L"",
-                                 workingDir, &siex.StartupInfo, &procInfo);
+                                 &sa, TRUE, creationFlags, L"", workingDir,
+                                 &siex.StartupInfo, &procInfo);
   DeleteProcThreadAttributeList(attrList);
   free(attrList);
   CloseHandle(impersonationToken);
@@ -375,20 +425,30 @@ bool CreateSandboxedProcess(wchar_t* aExecutablePath, wchar_t* aLibraryPath)
     WaitForSingleObject(procInfo.hProcess, INFINITE);
     CloseHandle(procInfo.hProcess);
   }
+  CloseHandle(job);
   return result;
 }
 
 int wmain(int argc, wchar_t* argv[])
 {
-  if (argc == 4 && !wcsicmp(argv[1], CMD_OPT_SANDBOXED)) {
-    wistringstream iss(argv[3]);
-    HANDLE privToken = NULL;
-    iss >> privToken;
-    if (!iss) {
-      return false;
+  if (argc == 5 && !wcsicmp(argv[1], CMD_OPT_SANDBOXED)) {
+    HANDLE privToken = NULL, job = NULL;
+    {
+      wistringstream iss(argv[3]);
+      iss >> privToken;
+      if (!iss) {
+        return false;
+      }
+    }
+    {
+      wistringstream iss(argv[4]);
+      iss >> job;
+      if (!iss) {
+        return false;
+      }
     }
     PrototypeSandbox sb(argv[2]);
-    if (!sb.Init(privToken)) {
+    if (!sb.Init(privToken, job)) {
       return EXIT_FAILURE;
     }
   } else if (argc == 2) {
