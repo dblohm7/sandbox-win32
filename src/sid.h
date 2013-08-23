@@ -16,20 +16,23 @@ class Sid
 { 
 public:
   Sid();
+  Sid(const Sid& aOther);
   ~Sid();
+
+  Sid& operator=(const Sid& aOther);
 
   bool Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1 = 0,
             DWORD aRid2 = 0, DWORD aRid3 = 0, DWORD aRid4 = 0, DWORD aRid5 = 0,
             DWORD aRid6 = 0, DWORD aRid7 = 0);
   bool Init(WELL_KNOWN_SID_TYPE aSidType);
-  bool Init(PSID aSid);
+  bool Init(const PSID aSid);
 
   bool InitCustom();
 
   bool IsValid() const { return !!mSid; }
-  void GetTrustee(TRUSTEE& aTrustee);
+  void GetTrustee(TRUSTEE& aTrustee) const;
 
-  operator PSID() { return mSid; }
+  operator PSID() const { return mSid; }
   bool operator== (PSID aOther) const;
   bool operator== (const Sid& aOther) const;
 
@@ -46,6 +49,8 @@ public:
   static Sid& GetIntegritySystem();
 
 private:
+  void Clear();
+
   PSID          mSid;
   bool          mSelfAllocated;
 

@@ -27,7 +27,20 @@ Sid::Sid()
 {
 }
 
+Sid::Sid(const Sid& aOther)
+  :mSid(nullptr),
+   mSelfAllocated(false)
+{
+  *this = aOther;
+}
+
 Sid::~Sid()
+{
+  Clear();
+}
+
+void
+Sid::Clear()
 {
   if (mSid) {
     if (mSelfAllocated) {
@@ -35,7 +48,16 @@ Sid::~Sid()
     } else {
       ::FreeSid(mSid);
     }
+    mSid = nullptr;
+    mSelfAllocated = false;
   }
+}
+
+Sid& Sid::operator=(const Sid& aOther)
+{
+  Clear();
+  Init((PSID)aOther);
+  return *this;
 }
 
 bool
@@ -76,7 +98,7 @@ Sid::Init(WELL_KNOWN_SID_TYPE aSidType)
 }
 
 bool
-Sid::Init(PSID aSid)
+Sid::Init(const PSID aSid)
 {
   if (mSid || !aSid || !::IsValidSid(aSid)) return false;
   DWORD len = ::GetLengthSid(aSid);
@@ -113,7 +135,7 @@ Sid::InitCustom()
 }
 
 void
-Sid::GetTrustee(TRUSTEE& aTrustee)
+Sid::GetTrustee(TRUSTEE& aTrustee) const
 {
   if (!mSid) {
     return;

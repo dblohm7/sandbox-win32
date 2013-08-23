@@ -32,19 +32,19 @@ Dacl::Clear()
 }
 
 void
-Dacl::AddAllowedAce(Sid& aSid, ACCESS_MASK aAccessMask)
+Dacl::AddAllowedAce(const Sid& aSid, ACCESS_MASK aAccessMask)
 {
   return AddAce(aSid, GRANT_ACCESS, aAccessMask);
 }
 
 void
-Dacl::AddDeniedAce(Sid& aSid, ACCESS_MASK aAccessMask)
+Dacl::AddDeniedAce(const Sid& aSid, ACCESS_MASK aAccessMask)
 {
   return AddAce(aSid, DENY_ACCESS, aAccessMask);
 }
 
 void
-Dacl::AddAce(Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask)
+Dacl::AddAce(const Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask)
 {
   EXPLICIT_ACCESS ea;
   ::memset(&ea, 0, sizeof(ea));

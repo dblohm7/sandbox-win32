@@ -24,14 +24,14 @@ public:
 
   void Clear();
 
-  void AddAllowedAce(Sid& aSid, ACCESS_MASK aAccessMask);
-  void AddDeniedAce(Sid& aSid, ACCESS_MASK aAccessMask);
+  void AddAllowedAce(const Sid& aSid, ACCESS_MASK aAccessMask);
+  void AddDeniedAce(const Sid& aSid, ACCESS_MASK aAccessMask);
   bool Merge(PACL aAcl);
 
   operator PACL();
 
 private:
-  void AddAce(Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask);
+  void AddAce(const Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask);
 
   PACL                          mAcl;
   bool                          mModified;
