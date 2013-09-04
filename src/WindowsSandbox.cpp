@@ -188,6 +188,7 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
   }
   PSECURITY_DESCRIPTOR modifiedCurDesktopSd =
                             (PSECURITY_DESCRIPTOR) ::calloc(curDesktopSdSize, 1);
+  LOKI_ON_BLOCK_EXIT(::free, modifiedCurDesktopSd);
   PACL curDesktopDacl = (PACL) ::calloc(curDesktopDaclSize, 1);
   LOKI_ON_BLOCK_EXIT(::free, curDesktopDacl);
   PACL curDesktopSacl = (PACL) ::calloc(curDesktopSaclSize, 1);
@@ -415,7 +416,6 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
     if (!pInitializeProcThreadAttributeList(attrList, 1, 0, &attrListSize)) {
       return false;
     }
-    LOKI_ON_BLOCK_EXIT(pDeleteProcThreadAttributeList, attrList);
     size_t handleCount = mHandlesToInherit.size();
     HANDLE *inheritableHandles = new HANDLE[mHandlesToInherit.size() + 2];
     memcpy(inheritableHandles, &mHandlesToInherit[0],
