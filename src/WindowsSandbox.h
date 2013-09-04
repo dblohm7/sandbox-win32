@@ -54,11 +54,6 @@ public:
   bool IsSandboxRunning() const;
 
 private:
-  /*
-  PTOKEN_GROUPS CreateSidsToDisable(HANDLE aToken,
-                                    std::vector<SID_AND_ATTRIBUTES>& aOut,
-                                    Sid& aLogonSid);
-                                    */
   bool CreateSidList(HANDLE aToken, SID_AND_ATTRIBUTES*& aOutput,
                      unsigned int& aNumSidAttrs, unsigned int aFilterFlags,
                      mozilla::Sid* aLogonSid = nullptr);

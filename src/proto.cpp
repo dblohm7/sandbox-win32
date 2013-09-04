@@ -8,7 +8,6 @@
 #include <iostream>
 #include <cstring>
 #include <sstream>
-#include <vector>
 #define _WIN32_WINNT 0x0600
 #include <windows.h>
 #include <sddl.h>
@@ -19,10 +18,8 @@
 
 using std::wcout;
 using std::endl;
-using std::wistringstream;
 using std::wostringstream;
 using std::hex;
-using std::vector;
 using mozilla::WindowsSandbox;
 using mozilla::WindowsSandboxLauncher;
 
@@ -54,7 +51,7 @@ public:
   explicit PrototypeSandbox(const wchar_t *aLibPath)
     :mLibPath(aLibPath),
      mLib(NULL),
-     mDeinitializeCdmModule(nullptr)
+     mDeinit(nullptr)
   {}
   virtual ~PrototypeSandbox() {}
 
@@ -65,7 +62,7 @@ protected:
 private:
   const wchar_t*  mLibPath;
   HMODULE         mLib;
-  DEINITFUNC      mDeinitializeCdmModule;
+  DEINITFUNC      mDeinit;
 };
 
 bool
@@ -87,18 +84,12 @@ PrototypeSandbox::OnPrivInit()
   return !!mLib;
 }
 
-#define INITIALIZE_CDM_MODULE InitializeCdmModule_4
-#define CDM_INIT_FUNCTION_NAME2(name) #name
-#define CDM_INIT_FUNCTION_NAME(name) CDM_INIT_FUNCTION_NAME2(name)
-
 bool
 PrototypeSandbox::OnInit()
 {
-  INITFUNC init = (INITFUNC) ::GetProcAddress(mLib,
-                                CDM_INIT_FUNCTION_NAME(INITIALIZE_CDM_MODULE));
-  mDeinitializeCdmModule = (DEINITFUNC) ::GetProcAddress(mLib,
-                                                         "DeinitializeCdmModule");
-  if (!init || !mDeinitializeCdmModule) {
+  INITFUNC init = (INITFUNC) ::GetProcAddress(mLib, INIT_FUNCTION_NAME);
+  mDeinit = (DEINITFUNC) ::GetProcAddress(mLib, DEINIT_FUNCTION_NAME);
+  if (!init || !mDeinit) {
     return false;
   }
   init();
@@ -108,9 +99,9 @@ PrototypeSandbox::OnInit()
 void
 PrototypeSandbox::OnFini()
 {
-  if (mDeinitializeCdmModule) {
-    mDeinitializeCdmModule();
-    mDeinitializeCdmModule = nullptr;
+  if (mDeinit) {
+    mDeinit();
+    mDeinit = nullptr;
   }
   if (mLib) {
     ::FreeLibrary(mLib);

@@ -135,6 +135,7 @@ WindowsSandboxLauncher::CreateSidList(HANDLE aToken,
                     ::calloc(sizeof(SID_AND_ATTRIBUTES) * sidCount + length, 1);
   DWORD sidIndex = 0;
   PBYTE sidPtr = (PBYTE) &tmpOutput[sidCount];
+  // Pass 2: Now populate the output
   for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
     if (tokenGroups->Groups[i].Attributes & SE_GROUP_INTEGRITY) {
       if (aFilterFlags & FILTER_INTEGRITY) {
@@ -227,9 +228,9 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                            sizeof(tokenDacl))) {
     return false;
   }
-  // 2. Duplicate the process token for impersonation and make it inheritable.
+  // 2. Duplicate the process token for impersonation.
   //    This will allow the sandbox to temporarily masquerade as a more 
-  //    privileged process until we drop privileges.
+  //    privileged process until it reverts to self.
   PSID_AND_ATTRIBUTES toRestrictImp = nullptr;
   unsigned int toRestrictImpCount = 0;
   if (!CreateSidList(processToken, toRestrictImp, toRestrictImpCount,
@@ -244,7 +245,7 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                                      &tmp);
   ScopedHandle tmpImpToken(tmp);
   tmp = NULL;
-  // We need to duplicat the impersonation token to raise its impersonation
+  // We need to duplicate the impersonation token to raise its impersonation
   // level to SecurityImpersonation, or else that won't work.
   result = !!DuplicateTokenEx(tmpImpToken, TOKEN_IMPERSONATE | TOKEN_QUERY,
                               nullptr, SecurityImpersonation,
@@ -486,12 +487,11 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   wostringstream oss;
   oss << aBaseCmdLine;
   oss << L" ";
-  oss << L" ";
   oss << WindowsSandbox::SWITCH_JOB_HANDLE;
   oss << L" ";
   oss << hex << job;
-  // 6. Set the working directory. With UIPI on Vista most directories are
-  //    inaccessible.
+  // 6. Set the working directory. With low integrity levels on Vista most
+  //    directories are inaccessible.
   wchar_t workingDir[MAX_PATH + 1] = {0};
   if (!GetWorkingDirectory(restrictedToken, workingDir,
                            sizeof(workingDir)/sizeof(workingDir[0]))) {
