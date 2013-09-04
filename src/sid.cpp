@@ -9,7 +9,6 @@
 
 namespace mozilla {
 
-Sid Sid::sLogonId;
 Sid Sid::sAdministrators;
 Sid Sid::sLocalSystem;
 Sid Sid::sEveryone;
@@ -159,25 +158,6 @@ Sid::operator==(const Sid& aOther) const
     return false;
   }
   return !!::EqualSid(mSid, aOther.mSid);
-}
-
-/* static */ Sid&
-Sid::GetLogonId()
-{
-  if (sLogonId.IsValid()) {
-    return sLogonId;
-  }
-  HANDLE token = NULL;
-  if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) {
-    TOKEN_USER userInfo;
-    ::memset(&userInfo, 0, sizeof(userInfo));
-    if (::GetTokenInformation(token, TokenUser, &userInfo, sizeof(userInfo),
-                              nullptr)) {
-      sLogonId.Init(userInfo.User.Sid);
-    }
-    ::CloseHandle(token);
-  }
-  return sLogonId;
 }
 
 /* static */ Sid&

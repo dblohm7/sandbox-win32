@@ -7,6 +7,7 @@
 #include "WindowsSandbox.h"
 #include "loki/ScopeGuard.h"
 #include "dacl.h"
+#include "sidattrs.h"
 #include <sstream>
 #include <shlobj.h>
 
@@ -72,113 +73,6 @@ WindowsSandbox::Fini()
   OnFini();
 }
 
-enum SidListFilterFlag
-{
-  FILTER_NOTHING = 0,
-  FILTER_INTEGRITY = 1,
-  FILTER_RESTRICTED_DISABLE = 2
-};
-
-bool
-WindowsSandboxLauncher::CreateSidList(HANDLE aToken,
-                                      SID_AND_ATTRIBUTES*& aOutput,
-                                      unsigned int& aNumSidAttrs,
-                                      unsigned int aFilterFlags,
-                                      mozilla::Sid* aLogonSid)
-{
-  aOutput = nullptr;
-  aNumSidAttrs = 0;
-  if (!aToken) {
-    return false;
-  }
-  // Get size
-  DWORD reqdLen = 0;
-  if (!::GetTokenInformation(aToken, TokenGroups, nullptr, 0, &reqdLen) &&
-      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    return false;
-  }
-  PTOKEN_GROUPS tokenGroups = (PTOKEN_GROUPS)::calloc(reqdLen, 1);
-  if (!::GetTokenInformation(aToken, TokenGroups, tokenGroups, reqdLen,
-                             &reqdLen)) {
-    return false;
-  }
-  LOKI_ON_BLOCK_EXIT(::free, tokenGroups);
-  // Pass 1: Figure out how many SID_AND_ATTRIBUTES we need and include
-  //         room for the sid data itself
-  DWORD length = 0;
-  DWORD sidCount = 0;
-  for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
-    if (tokenGroups->Groups[i].Attributes & SE_GROUP_INTEGRITY) {
-      if (aFilterFlags & FILTER_INTEGRITY) {
-        continue;
-      }
-    }
-    if (tokenGroups->Groups[i].Attributes & SE_GROUP_LOGON_ID) {
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    if (mozilla::Sid::GetEveryone() == tokenGroups->Groups[i].Sid) {
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    if (mozilla::Sid::GetUsers() == tokenGroups->Groups[i].Sid) {
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    ++sidCount;
-    length += ::GetLengthSid(tokenGroups->Groups[i].Sid);
-  }
-  PSID_AND_ATTRIBUTES tmpOutput = (PSID_AND_ATTRIBUTES)
-                    ::calloc(sizeof(SID_AND_ATTRIBUTES) * sidCount + length, 1);
-  DWORD sidIndex = 0;
-  PBYTE sidPtr = (PBYTE) &tmpOutput[sidCount];
-  // Pass 2: Now populate the output
-  for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
-    if (tokenGroups->Groups[i].Attributes & SE_GROUP_INTEGRITY) {
-      if (aFilterFlags & FILTER_INTEGRITY) {
-        continue;
-      }
-    }
-    if (tokenGroups->Groups[i].Attributes & SE_GROUP_LOGON_ID) {
-      if (aLogonSid) {
-        aLogonSid->Init(tokenGroups->Groups[i].Sid);
-      }
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    if (mozilla::Sid::GetEveryone() == tokenGroups->Groups[i].Sid) {
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    if (mozilla::Sid::GetUsers() == tokenGroups->Groups[i].Sid) {
-      if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
-        continue;
-      }
-    }
-    DWORD len = ::GetLengthSid(tokenGroups->Groups[i].Sid);
-    if (!::CopySid(len, (PSID)sidPtr, tokenGroups->Groups[i].Sid)) {
-      ::free(tmpOutput);
-      return false;
-    }
-    tmpOutput[sidIndex++].Sid = sidPtr;
-    sidPtr += len;
-  }
-  aOutput = tmpOutput;
-  aNumSidAttrs = sidCount;
-  return true;
-}
-
-void
-WindowsSandboxLauncher::FreeSidList(SID_AND_ATTRIBUTES* aListToFree)
-{
-  ::free(aListToFree);
-}
-
 bool
 WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                                      ScopedHandle& aRestrictedToken,
@@ -193,13 +87,12 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
     return false;
   }
   ScopedHandle processToken(tmp);
-  PSID_AND_ATTRIBUTES toDisable = nullptr;
-  unsigned int numToDisable = 0;
-  if (!CreateSidList(processToken, toDisable, numToDisable,
-                     FILTER_RESTRICTED_DISABLE, &aLogonSid)) {
+  SidAttributes toDisable;
+  if (!toDisable.CreateFromTokenGroups(processToken,
+                                       SidAttributes::FILTER_RESTRICTED_DISABLE,
+                                       &aLogonSid)) {
     return false;
   }
-  LOKI_ON_BLOCK_EXIT_OBJ(*this, &WindowsSandboxLauncher::FreeSidList, toDisable);
   SID_AND_ATTRIBUTES toRestrict[] = {{mozilla::Sid::GetEveryone()},
                                      {mozilla::Sid::GetUsers()},
                                      {mozilla::Sid::GetRestricted()},
@@ -207,7 +100,7 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                                      {const_cast<mozilla::Sid&>(aCustomSid)}};
   tmp = NULL;
   bool result = !!::CreateRestrictedToken(processToken, DISABLE_MAX_PRIVILEGE |
-                                          SANDBOX_INERT, numToDisable,
+                                          SANDBOX_INERT, toDisable.Count(),
                                           toDisable, 0, nullptr,
                                           sizeof(toRestrict)
                                             / sizeof(SID_AND_ATTRIBUTES),
@@ -231,22 +124,19 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
   // 2. Duplicate the process token for impersonation.
   //    This will allow the sandbox to temporarily masquerade as a more 
   //    privileged process until it reverts to self.
-  PSID_AND_ATTRIBUTES toRestrictImp = nullptr;
-  unsigned int toRestrictImpCount = 0;
-  if (!CreateSidList(processToken, toRestrictImp, toRestrictImpCount,
-                     FILTER_INTEGRITY, &aLogonSid)) {
+  SidAttributes toRestrictImp;
+  if (!toRestrictImp.CreateFromTokenGroups(processToken,
+                                           SidAttributes::FILTER_INTEGRITY)) {
     return false;
   }
-  LOKI_ON_BLOCK_EXIT_OBJ(*this, &WindowsSandboxLauncher::FreeSidList,
-                         toRestrictImp);
   tmp = NULL;
   result = !!::CreateRestrictedToken(processToken, SANDBOX_INERT, 0, nullptr, 0,
-                                     nullptr, toRestrictImpCount, toRestrictImp,
-                                     &tmp);
+                                     nullptr, toRestrictImp.Count(),
+                                     toRestrictImp, &tmp);
   ScopedHandle tmpImpToken(tmp);
   tmp = NULL;
   // We need to duplicate the impersonation token to raise its impersonation
-  // level to SecurityImpersonation, or else that won't work.
+  // level to SecurityImpersonation, or else impersonation won't work.
   result = !!DuplicateTokenEx(tmpImpToken, TOKEN_IMPERSONATE | TOKEN_QUERY,
                               nullptr, SecurityImpersonation,
                               TokenImpersonation, &tmp);

@@ -36,7 +36,6 @@ public:
   bool operator== (PSID aOther) const;
   bool operator== (const Sid& aOther) const;
 
-  static Sid& GetLogonId();
   static Sid& GetAdministrators();
   static Sid& GetLocalSystem();
   static Sid& GetEveryone();
@@ -54,7 +53,6 @@ private:
   PSID          mSid;
   bool          mSelfAllocated;
 
-  static Sid sLogonId;
   static Sid sAdministrators;
   static Sid sLocalSystem;
   static Sid sEveryone;
