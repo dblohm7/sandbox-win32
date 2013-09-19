@@ -118,17 +118,7 @@ Sid::InitCustom()
   if (::UuidCreate(&uuid) != RPC_S_OK) {
     return false;
   }
-  DWORD subAuth[4];
-  subAuth[0] = uuid.Data1;
-  subAuth[1] = (uuid.Data2 << 16) | uuid.Data3;
-  subAuth[2] = (uuid.Data4[0] << 24) |
-               (uuid.Data4[1] << 16) |
-               (uuid.Data4[2] << 8) |
-               uuid.Data4[3];
-  subAuth[3] = (uuid.Data4[4] << 24) |
-               (uuid.Data4[5] << 16) |
-               (uuid.Data4[6] << 8) |
-               uuid.Data4[7];
+  DWORD *subAuth = (DWORD*) &uuid;
   SID_IDENTIFIER_AUTHORITY auth = SECURITY_RESOURCE_MANAGER_AUTHORITY;
   return Init(auth, subAuth[0], subAuth[1], subAuth[2], subAuth[3]);
 }
