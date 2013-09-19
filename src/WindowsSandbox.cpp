@@ -451,10 +451,10 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   }
   SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, FALSE};
   PROCESS_INFORMATION procInfo;
-  result = !!CreateProcessAsUser(restrictedToken, aExecutablePath,
-                                 const_cast<wchar_t*>(oss.str().c_str()), &sa,
-                                 &sa, TRUE, creationFlags, L"", workingDir,
-                                 &siex.StartupInfo, &procInfo);
+  result = !!::CreateProcessAsUser(restrictedToken, aExecutablePath,
+                                   const_cast<wchar_t*>(oss.str().c_str()), &sa,
+                                   &sa, TRUE, creationFlags, L"", workingDir,
+                                   &siex.StartupInfo, &procInfo);
   ScopedHandle childProcess(procInfo.hProcess);
   ScopedHandle mainThread(procInfo.hThread);
   if (mHasWinVistaAPIs) {
