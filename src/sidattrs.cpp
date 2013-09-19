@@ -28,8 +28,7 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
     return false;
   }
   LOKI_ON_BLOCK_EXIT(::free, tokenGroups);
-  // Pass 1: Figure out how many SID_AND_ATTRIBUTES we need and include
-  //         room for the sid data itself
+  // Pass 1: Figure out how many SID_AND_ATTRIBUTES we need
   DWORD sidCount = 0;
   for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
     if (tokenGroups->Groups[i].Attributes & SE_GROUP_INTEGRITY) {
