@@ -6,7 +6,7 @@
 
 #define DECLARE_UNIQUE_LEN(type, name) \
   std::unique_ptr<unsigned char[]> name##Bytes; \
-  type name
+  type name = nullptr
 #define ALLOC_UNIQUE_LEN(name, numBytes) \
   name##Bytes = std::make_unique<unsigned char[]>(numBytes); \
   name = reinterpret_cast<decltype(name)>(name##Bytes.get())
