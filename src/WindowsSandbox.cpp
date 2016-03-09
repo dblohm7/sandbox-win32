@@ -45,23 +45,128 @@ WindowsSandbox::DropProcessIntegrityLevel()
 }
 
 bool
+WindowsSandbox::SetMitigations(const DWORD64 aMitigations)
+{
+  const DWORD64 kDEPPolicies =
+    PROCESS_CREATION_MITIGATION_POLICY_DEP_ENABLE |
+    PROCESS_CREATION_MITIGATION_POLICY_DEP_ATL_THUNK_ENABLE
+    ;
+  const DWORD64 kASLRPolicies =
+    PROCESS_CREATION_MITIGATION_POLICY_FORCE_RELOCATE_IMAGES_ALWAYS_ON_REQ_RELOCS |
+#if defined(_M_X64)
+    PROCESS_CREATION_MITIGATION_POLICY_HIGH_ENTROPY_ASLR_ALWAYS_ON |
+#endif
+    PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_ON
+    ;
+  // Not all mitigations can be set at runtime
+  const DWORD64 kAvailableMitigations =
+    kDEPPolicies |
+    kASLRPolicies |
+    PROCESS_CREATION_MITIGATION_POLICY_STRICT_HANDLE_CHECKS_ALWAYS_ON |
+    PROCESS_CREATION_MITIGATION_POLICY_WIN32K_SYSTEM_CALL_DISABLE_ALWAYS_ON |
+#if _WIN32_WINNT >= 0x0A00
+    PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON |
+#endif
+    PROCESS_CREATION_MITIGATION_POLICY_EXTENSION_POINT_DISABLE_ALWAYS_ON
+    ;
+  if ((aMitigations & ~kAvailableMitigations) != 0) {
+    return false;
+  }
+  auto pSetProcessMitigationPolicy =
+    reinterpret_cast<decltype(&SetProcessMitigationPolicy)>(::GetProcAddress(::GetModuleHandleW(L"kernel32.dll"),
+          "SetProcessMitigationPolicy"));
+  if (!pSetProcessMitigationPolicy) {
+    // Not available
+    return true;
+  }
+  BOOL ok = TRUE;
+  if (aMitigations & kDEPPolicies) {
+    PROCESS_MITIGATION_DEP_POLICY depPolicy = {0};
+    if (aMitigations & PROCESS_CREATION_MITIGATION_POLICY_DEP_ENABLE) {
+      depPolicy.Enable = 1;
+    }
+    if (aMitigations & PROCESS_CREATION_MITIGATION_POLICY_DEP_ATL_THUNK_ENABLE) {
+      depPolicy.DisableAtlThunkEmulation = 1;
+    }
+    ok &= pSetProcessMitigationPolicy(ProcessDEPPolicy, &depPolicy,
+                                      sizeof(depPolicy));
+  }
+  if (aMitigations & kASLRPolicies) {
+    PROCESS_MITIGATION_ASLR_POLICY aslrPolicy = {0};
+    if (aMitigations &
+        PROCESS_CREATION_MITIGATION_POLICY_FORCE_RELOCATE_IMAGES_ALWAYS_ON_REQ_RELOCS) {
+      aslrPolicy.EnableForceRelocateImages = 1;
+      aslrPolicy.DisallowStrippedImages = 1;
+    }
+    if (aMitigations &
+        PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_ON) {
+      aslrPolicy.EnableBottomUpRandomization = 1;
+    }
+#if defined(_M_X64)
+    if (aMitigations &
+        PROCESS_CREATION_MITIGATION_POLICY_HIGH_ENTROPY_ASLR_ALWAYS_ON) {
+      aslrPolicy.EnableHighEntropy = 1;
+    }
+#endif
+    ok &= pSetProcessMitigationPolicy(ProcessASLRPolicy, &aslrPolicy,
+                                      sizeof(aslrPolicy));
+  }
+  if (aMitigations &
+      PROCESS_CREATION_MITIGATION_POLICY_STRICT_HANDLE_CHECKS_ALWAYS_ON) {
+    PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY handleChkPolicy = {0};
+    handleChkPolicy.RaiseExceptionOnInvalidHandleReference = 1;
+    handleChkPolicy.HandleExceptionsPermanentlyEnabled = 1;
+    ok &= pSetProcessMitigationPolicy(ProcessStrictHandleCheckPolicy,
+                                      &handleChkPolicy, sizeof(handleChkPolicy));
+  }
+  if (aMitigations &
+      PROCESS_CREATION_MITIGATION_POLICY_WIN32K_SYSTEM_CALL_DISABLE_ALWAYS_ON) {
+    PROCESS_MITIGATION_SYSTEM_CALL_DISABLE_POLICY win32kPolicy = {0};
+    win32kPolicy.DisallowWin32kSystemCalls = 1;
+    ok &= pSetProcessMitigationPolicy(ProcessSystemCallDisablePolicy,
+                                      &win32kPolicy, sizeof(win32kPolicy));
+  }
+#if _WIN32_WINNT >= 0x0A00
+  if (aMitigations &
+      PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON) {
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signPolicy = {0};
+    signPolicy.MicrosoftSignedOnly = 1;
+    ok &= pSetProcessMitigationPolicy(ProcessSignaturePolicy,
+                                      &signPolicy, sizeof(signPolicy));
+  }
+#endif
+  if (aMitigations &
+      PROCESS_CREATION_MITIGATION_POLICY_EXTENSION_POINT_DISABLE_ALWAYS_ON) {
+    PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY dllPolicy = {0};
+    dllPolicy.DisableExtensionPoints = 1;
+    ok &= pSetProcessMitigationPolicy(ProcessExtensionPointDisablePolicy,
+                                      &dllPolicy, sizeof(dllPolicy));
+  }
+  return !!ok;
+}
+
+bool
 WindowsSandbox::Init(int aArgc, wchar_t* aArgv[])
 {
-  HANDLE job = NULL;
+  DECLARE_UNIQUE_KERNEL_HANDLE(job);
   for (int i = 1; i < aArgc; ++i) {
     if (!::wcscmp(aArgv[i], SWITCH_JOB_HANDLE) && i + 1 < aArgc) {
+      uintptr_t uijob;
       std::wistringstream iss(aArgv[++i]);
-      iss >> job;
+      iss >> uijob;
       if (!iss) {
         return false;
       }
+      job.reset(reinterpret_cast<HANDLE>(uijob));
     }
+  }
+  if (!SetMitigations(GetDeferredMitigationPolicies())) {
+    return false;
   }
   bool ok = OnPrivInit();
   ok = ::RevertToSelf() && ok;
   ok = DropProcessIntegrityLevel() && ok;
-  ok = ::AssignProcessToJobObject(job, ::GetCurrentProcess()) && ok;
-  ::CloseHandle(job);
+  ok = ::AssignProcessToJobObject(job.get(), ::GetCurrentProcess()) && ok;
   if (!ok) {
     return ok;
   }
@@ -73,6 +178,23 @@ WindowsSandbox::Fini()
 {
   OnFini();
 }
+
+const DWORD64 WindowsSandboxLauncher::DEFAULT_MITIGATION_POLICIES =
+  PROCESS_CREATION_MITIGATION_POLICY_DEP_ENABLE |
+  PROCESS_CREATION_MITIGATION_POLICY_DEP_ATL_THUNK_ENABLE |
+  PROCESS_CREATION_MITIGATION_POLICY_SEHOP_ENABLE |
+  PROCESS_CREATION_MITIGATION_POLICY_FORCE_RELOCATE_IMAGES_ALWAYS_ON_REQ_RELOCS |
+  PROCESS_CREATION_MITIGATION_POLICY_HEAP_TERMINATE_ALWAYS_ON |
+  PROCESS_CREATION_MITIGATION_POLICY_BOTTOM_UP_ASLR_ALWAYS_ON |
+#if defined(_M_X64)
+  PROCESS_CREATION_MITIGATION_POLICY_HIGH_ENTROPY_ASLR_ALWAYS_ON |
+#endif
+  PROCESS_CREATION_MITIGATION_POLICY_STRICT_HANDLE_CHECKS_ALWAYS_ON |
+#if _WIN32_WINNT >= 0x0A00
+  PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON |
+#endif
+  PROCESS_CREATION_MITIGATION_POLICY_EXTENSION_POINT_DISABLE_ALWAYS_ON
+  ;
 
 bool
 WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
@@ -256,7 +378,7 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
   uiLimits.UIRestrictionsClass = JOB_OBJECT_UILIMIT_DESKTOP |
                                  JOB_OBJECT_UILIMIT_DISPLAYSETTINGS |
                                  JOB_OBJECT_UILIMIT_EXITWINDOWS |
-                                 JOB_OBJECT_UILIMIT_GLOBALATOMS | 
+                                 JOB_OBJECT_UILIMIT_GLOBALATOMS |
                                  JOB_OBJECT_UILIMIT_HANDLES |
                                  JOB_OBJECT_UILIMIT_READCLIPBOARD |
                                  JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS |
@@ -269,10 +391,11 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
 }
 
 WindowsSandboxLauncher::WindowsSandboxLauncher()
-  :mHasWinVistaAPIs(false),
-   mHasWin8APIs(false),
-   mProcess(NULL),
-   mDesktop(NULL)
+  : mHasWinVistaAPIs(false)
+  , mHasWin8APIs(false)
+  , mMitigationPolicies(0)
+  , mProcess(NULL)
+  , mDesktop(NULL)
 {
 }
 
@@ -287,7 +410,7 @@ WindowsSandboxLauncher::~WindowsSandboxLauncher()
 }
 
 bool
-WindowsSandboxLauncher::Init()
+WindowsSandboxLauncher::Init(DWORD64 aMitigationPolicies)
 {
   OSVERSIONINFO osv = {sizeof(osv)};
   if (!::GetVersionEx(&osv)) {
@@ -296,6 +419,7 @@ WindowsSandboxLauncher::Init()
   mHasWinVistaAPIs = osv.dwMajorVersion >= 6;
   mHasWin8APIs = osv.dwMajorVersion > 6 ||
           osv.dwMajorVersion == 6 && osv.dwMinorVersion >= 2;
+  mMitigationPolicies = aMitigationPolicies;
   return true;
 }
 
@@ -399,14 +523,23 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
         !pDeleteProcThreadAttributeList) {
       return false;
     }
-    if (!pInitializeProcThreadAttributeList(nullptr, 1, 0, &attrListSize) &&
+    /* PROC_THREAD_ATTRIBUTE_HANDLE_LIST and
+     * PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY
+     */
+    const DWORD attrCount = 2;
+    if (!pInitializeProcThreadAttributeList(nullptr, attrCount, 0,
+                                            &attrListSize) &&
         GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
       return false;
     }
     ALLOC_UNIQUE_LEN(attrList, attrListSize);
-    if (!pInitializeProcThreadAttributeList(attrList, 1, 0, &attrListSize)) {
+    if (!pInitializeProcThreadAttributeList(attrList, attrCount, 0,
+                                            &attrListSize)) {
       return false;
     }
+    std::unique_ptr<_PROC_THREAD_ATTRIBUTE_LIST,
+      decltype(pDeleteProcThreadAttributeList)> listDeleter(attrList,
+          pDeleteProcThreadAttributeList);
     size_t handleCount = mHandlesToInherit.size();
     auto inheritableHandles = std::make_unique<HANDLE[]>(handleCount + 2);
     memcpy(inheritableHandles.get(), &mHandlesToInherit[0],
@@ -419,7 +552,13 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
                                           handleCount * sizeof(HANDLE), nullptr,
                                           nullptr);
     if (!result) {
-      pDeleteProcThreadAttributeList(attrList);
+      return false;
+    }
+    result = !!pUpdateProcThreadAttribute(attrList, 0,
+                                          PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY,
+                                          &mMitigationPolicies,
+                                          sizeof(DWORD64), nullptr, nullptr);
+    if (!result) {
       return false;
     }
   }

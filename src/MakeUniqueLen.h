@@ -9,7 +9,7 @@
   type name
 #define ALLOC_UNIQUE_LEN(name, numBytes) \
   name##Bytes = std::make_unique<unsigned char[]>(numBytes); \
-  name = reinterpret_cast<decltype(name)>(name##Bytes.get());
+  name = reinterpret_cast<decltype(name)>(name##Bytes.get())
 #define MAKE_UNIQUE_LEN(type, name, numBytes) \
   auto name##Bytes(std::make_unique<unsigned char[]>(numBytes)); \
   auto name = reinterpret_cast<type>(name##Bytes.get())

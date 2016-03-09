@@ -19,7 +19,6 @@ typedef UNIQUE_HANDLE_TYPE(HANDLE, &::CloseHandle) ScopedHandle;
 class WindowsSandbox
 {
 public:
-
   WindowsSandbox() {}
   virtual ~WindowsSandbox() {}
 
@@ -31,11 +30,13 @@ public:
   static const wchar_t SWITCH_JOB_HANDLE[];
 
 protected:
+  virtual DWORD64 GetDeferredMitigationPolicies() { return 0; }
   virtual bool OnPrivInit() = 0;
   virtual bool OnInit() = 0;
   virtual void OnFini() = 0;
 
 private:
+  bool SetMitigations(const DWORD64 aMitigations);
   bool DropProcessIntegrityLevel();
 };
 
@@ -45,7 +46,7 @@ public:
   WindowsSandboxLauncher();
   ~WindowsSandboxLauncher();
 
-  bool Init();
+  bool Init(DWORD64 aMitigationPolicies = DEFAULT_MITIGATION_POLICIES);
   inline void AddHandleToInherit(HANDLE aHandle)
   {
     if (aHandle) {
@@ -55,6 +56,8 @@ public:
   bool Launch(const wchar_t* aExecutablePath, const wchar_t* aBaseCmdLine);
   bool Wait(unsigned int aTimeoutMs) const;
   bool IsSandboxRunning() const;
+
+  static const DWORD64 DEFAULT_MITIGATION_POLICIES;
 
 private:
   bool CreateSidList(HANDLE aToken, SID_AND_ATTRIBUTES*& aOutput,
@@ -70,6 +73,7 @@ private:
   std::vector<HANDLE> mHandlesToInherit;
   bool    mHasWinVistaAPIs;
   bool    mHasWin8APIs;
+  DWORD64 mMitigationPolicies;
   HANDLE  mProcess;
   HDESK   mDesktop;
 };
