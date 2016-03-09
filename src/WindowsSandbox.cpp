@@ -273,8 +273,8 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
 HWINSTA
 WindowsSandboxLauncher::CreateWindowStation()
 {
-  DWORD desiredAccess = WINSTA_CREATEDESKTOP;
-  HWINSTA winsta = ::CreateWindowStation(nullptr, CWF_CREATE_ONLY,
+  DWORD desiredAccess = GENERIC_READ | WINSTA_CREATEDESKTOP;
+  HWINSTA winsta = ::CreateWindowStation(nullptr, 0,
                                          desiredAccess, nullptr);
   return winsta;
 }
