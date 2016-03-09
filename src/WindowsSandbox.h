@@ -66,7 +66,9 @@ private:
   void FreeSidList(SID_AND_ATTRIBUTES* aListToFree);
   bool CreateTokens(const Sid& aCustomSid, ScopedHandle& aRestrictedToken,
                     ScopedHandle& aImpersonationToken, Sid& aLogonSid);
-  HDESK CreateDesktop(const Sid& aCustomSid);
+  HWINSTA CreateWindowStation();
+  std::unique_ptr<wchar_t[]> GetWindowStationName(HWINSTA aWinsta);
+  HDESK CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid);
   bool CreateJob(ScopedHandle& aJob);
   bool GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf, size_t aBufLen);
 
@@ -76,6 +78,7 @@ private:
   bool    mHasWin10APIs;
   DWORD64 mMitigationPolicies;
   HANDLE  mProcess;
+  HWINSTA mWinsta;
   HDESK   mDesktop;
 };
 

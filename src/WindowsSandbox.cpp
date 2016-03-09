@@ -270,14 +270,35 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
   return true;
 }
 
+HWINSTA
+WindowsSandboxLauncher::CreateWindowStation()
+{
+  DWORD desiredAccess = WINSTA_CREATEDESKTOP;
+  HWINSTA winsta = ::CreateWindowStation(nullptr, CWF_CREATE_ONLY,
+                                         desiredAccess, nullptr);
+  return winsta;
+}
+
+std::unique_ptr<wchar_t[]>
+WindowsSandboxLauncher::GetWindowStationName(HWINSTA aWinsta)
+{
+  DWORD len = 0;
+  ::GetUserObjectInformation(aWinsta, UOI_NAME, nullptr, len, &len);
+  auto name(std::make_unique<wchar_t[]>(len));
+  if (!::GetUserObjectInformation(aWinsta, UOI_NAME, name.get(), len, &len)) {
+    return nullptr;
+  }
+  return name;
+}
+
 HDESK
-WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
+WindowsSandboxLauncher::CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid)
 {
   // 3. Create a new desktop for the sandbox.
   // 3a. Get the current desktop's DACL and Mandatory Label
   HDESK curDesktop = ::GetThreadDesktop(::GetCurrentThreadId());
   if (!curDesktop) {
-    return false;
+    return nullptr;
   }
   SECURITY_INFORMATION curDesktopSecInfo = DACL_SECURITY_INFORMATION;
   if (mHasWinVistaAPIs) {
@@ -287,12 +308,12 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
   if (!::GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, nullptr,
                                curDesktopSdSize, &curDesktopSdSize) &&
                                ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    return false;
+    return nullptr;
   }
   MAKE_UNIQUE_LEN(PSECURITY_DESCRIPTOR, curDesktopSd, curDesktopSdSize);
   if (!::GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
                                curDesktopSdSize, &curDesktopSdSize)) {
-    return false;
+    return nullptr;
   }
   // 3b. Convert security descriptor from self-relative to absolute so that we
   //     can modify it.
@@ -305,7 +326,7 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
                        &curDesktopSaclSize, nullptr, &curDesktopOwnerSize,
                        nullptr, &curDesktopPrimaryGroupSize) &&
      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    return false;
+    return nullptr;
   }
   MAKE_UNIQUE_LEN(PSECURITY_DESCRIPTOR, modifiedCurDesktopSd, curDesktopSdSize);
   MAKE_UNIQUE_LEN(PACL, curDesktopDacl, curDesktopDaclSize);
@@ -324,7 +345,7 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
                               &curDesktopOwnerSize, curDesktopPrimaryGroup,
                               &curDesktopPrimaryGroupSize);
   if (!result) {
-    return false;
+    return nullptr;
   }
   // 3c. Add aCustomSid to the default desktop's DACL to finish plugging the
   //     SetThreadDesktop security hole.
@@ -332,24 +353,33 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
   modifiedCurDesktopDacl.AddDeniedAce(aCustomSid, GENERIC_ALL);
   result = modifiedCurDesktopDacl.Merge(curDesktopDacl);
   if (!result) {
-    return false;
+    return nullptr;
   }
   // 3d. Set the security descriptor for the current desktop
   if (!::SetSecurityDescriptorDacl(modifiedCurDesktopSd, TRUE,
                                    modifiedCurDesktopDacl, FALSE)) {
-    return false;
+    return nullptr;
   }
   curDesktopSecInfo = DACL_SECURITY_INFORMATION;
   result = !!::SetUserObjectSecurity(curDesktop, &curDesktopSecInfo,
                                      modifiedCurDesktopSd);
   if (!result) {
-    return false;
+    return nullptr;
   }
-  // 3e. Create the new desktop using the absolute security descriptor
+  // 3e. Temporarily set the window station to the sandbox window station
+  HWINSTA curWinsta = ::GetProcessWindowStation();
+  if (!::SetProcessWindowStation(aWinsta)) {
+    return nullptr;
+  }
+  // 3f. Create the new desktop using the absolute security descriptor
   SECURITY_ATTRIBUTES newDesktopSa = {sizeof(newDesktopSa), curDesktopSd, FALSE};
   HDESK desktop = ::CreateDesktop(WindowsSandbox::DESKTOP_NAME, nullptr,
                                   nullptr, 0, DESKTOP_CREATEWINDOW,
                                   &newDesktopSa);
+  // 3g. Revert to our previous window station
+  if (!::SetProcessWindowStation(curWinsta)) {
+    // uh-oh! we should warn!
+  }
   return desktop;
 }
 
@@ -397,6 +427,7 @@ WindowsSandboxLauncher::WindowsSandboxLauncher()
   , mHasWin10APIs(false)
   , mMitigationPolicies(0)
   , mProcess(NULL)
+  , mWinsta(NULL)
   , mDesktop(NULL)
 {
 }
@@ -408,6 +439,9 @@ WindowsSandboxLauncher::~WindowsSandboxLauncher()
   }
   if (mDesktop) {
     ::CloseDesktop(mDesktop);
+  }
+  if (mWinsta) {
+    ::CloseWindowStation(mWinsta);
   }
 }
 
@@ -495,7 +529,8 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   if (!CreateTokens(customSid, restrictedToken, impersonationToken, logonSid)) {
     return false;
   }
-  mDesktop = CreateDesktop(customSid);
+  mWinsta = CreateWindowStation();
+  mDesktop = CreateDesktop(mWinsta, customSid);
   DECLARE_UNIQUE_KERNEL_HANDLE(job);
   if (!CreateJob(job)) {
     return false;
@@ -574,7 +609,10 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   // 8. Create the process using the restricted token
   STARTUPINFOEX siex;
   ZeroMemory(&siex, sizeof(siex));
-  siex.StartupInfo.lpDesktop = (LPWSTR)WindowsSandbox::DESKTOP_NAME;
+  auto winstaName = GetWindowStationName(mWinsta);
+  std::wostringstream ssDesktop;
+  ssDesktop << winstaName.get() << L"\\" << WindowsSandbox::DESKTOP_NAME;
+  siex.StartupInfo.lpDesktop = (LPWSTR)ssDesktop.str().c_str();
   DWORD creationFlags = CREATE_SUSPENDED;
   if (mHasWinVistaAPIs) {
     siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
