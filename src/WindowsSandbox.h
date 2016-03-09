@@ -8,15 +8,18 @@
 #define __WINDOWSSANDBOX_H
 
 #include <windows.h>
-#include "scoped_handle_win.h"
 #include "Sid.h"
+#include "UniqueHandle.h"
 #include <vector>
 
 namespace mozilla {
 
+typedef UNIQUE_HANDLE_TYPE(HANDLE, &::CloseHandle) ScopedHandle;
+
 class WindowsSandbox
 {
 public:
+
   WindowsSandbox() {}
   virtual ~WindowsSandbox() {}
 

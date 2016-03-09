@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "sidattrs.h"
-#include "loki/ScopeGuard.h"
+#include "MakeUniqueLen.h"
 
 namespace mozilla {
 
@@ -22,12 +22,11 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
       ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
-  PTOKEN_GROUPS tokenGroups = (PTOKEN_GROUPS)::calloc(reqdLen, 1);
+  MAKE_UNIQUE_LEN(PTOKEN_GROUPS, tokenGroups, reqdLen);
   if (!::GetTokenInformation(aToken, TokenGroups, tokenGroups, reqdLen,
                              &reqdLen)) {
     return false;
   }
-  LOKI_ON_BLOCK_EXIT(::free, tokenGroups);
   // Pass 1: Figure out how many SID_AND_ATTRIBUTES we need
   DWORD sidCount = 0;
   for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {

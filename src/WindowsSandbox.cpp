@@ -5,8 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WindowsSandbox.h"
-#include "loki/ScopeGuard.h"
+#include "ArrayLength.h"
 #include "dacl.h"
+#include "MakeUniqueLen.h"
 #include "sidattrs.h"
 #include <sstream>
 #include <shlobj.h>
@@ -86,9 +87,9 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                           &tmp)) {
     return false;
   }
-  ScopedHandle processToken(tmp);
+  ScopedHandle processToken(tmp, &::CloseHandle);
   SidAttributes toDisable;
-  if (!toDisable.CreateFromTokenGroups(processToken,
+  if (!toDisable.CreateFromTokenGroups(processToken.get(),
                                        SidAttributes::FILTER_RESTRICTED_DISABLE,
                                        &aLogonSid)) {
     return false;
@@ -99,13 +100,12 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                                      {aLogonSid},
                                      {const_cast<mozilla::Sid&>(aCustomSid)}};
   tmp = NULL;
-  bool result = !!::CreateRestrictedToken(processToken, DISABLE_MAX_PRIVILEGE |
-                                          SANDBOX_INERT, toDisable.Count(),
-                                          toDisable, 0, nullptr,
-                                          sizeof(toRestrict)
-                                            / sizeof(SID_AND_ATTRIBUTES),
+  bool result = !!::CreateRestrictedToken(processToken.get(),
+                                          DISABLE_MAX_PRIVILEGE | SANDBOX_INERT,
+                                          toDisable.Count(), toDisable, 0,
+                                          nullptr, ArrayLength(toRestrict),
                                           toRestrict, &tmp);
-  aRestrictedToken.Set(tmp);
+  aRestrictedToken.reset(tmp);
   if (!result) {
     return false;
   }
@@ -117,7 +117,7 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
   TOKEN_DEFAULT_DACL tokenDacl;
   ZeroMemory(&tokenDacl, sizeof(tokenDacl));
   tokenDacl.DefaultDacl = (PACL)dacl;
-  if (!SetTokenInformation(aRestrictedToken, TokenDefaultDacl, &tokenDacl,
+  if (!SetTokenInformation(aRestrictedToken.get(), TokenDefaultDacl, &tokenDacl,
                            sizeof(tokenDacl))) {
     return false;
   }
@@ -125,25 +125,25 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
   //    This will allow the sandbox to temporarily masquerade as a more 
   //    privileged process until it reverts to self.
   SidAttributes toRestrictImp;
-  if (!toRestrictImp.CreateFromTokenGroups(processToken,
+  if (!toRestrictImp.CreateFromTokenGroups(processToken.get(),
                                            SidAttributes::FILTER_INTEGRITY)) {
     return false;
   }
   tmp = NULL;
-  result = !!::CreateRestrictedToken(processToken, SANDBOX_INERT, 0, nullptr, 0,
-                                     nullptr, toRestrictImp.Count(),
+  result = !!::CreateRestrictedToken(processToken.get(), SANDBOX_INERT, 0,
+                                     nullptr, 0, nullptr, toRestrictImp.Count(),
                                      toRestrictImp, &tmp);
-  ScopedHandle tmpImpToken(tmp);
+  ScopedHandle tmpImpToken(tmp, &::CloseHandle);
   tmp = NULL;
   // We need to duplicate the impersonation token to raise its impersonation
   // level to SecurityImpersonation, or else impersonation won't work.
-  result = !!DuplicateTokenEx(tmpImpToken, TOKEN_IMPERSONATE | TOKEN_QUERY,
+  result = !!DuplicateTokenEx(tmpImpToken.get(), TOKEN_IMPERSONATE | TOKEN_QUERY,
                               nullptr, SecurityImpersonation,
                               TokenImpersonation, &tmp);
   if (!result) {
     return false;
   }
-  aImpersonationToken.Set(tmp);
+  aImpersonationToken.reset(tmp);
   return true;
 }
 
@@ -160,15 +160,13 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
   if (mHasWinVistaAPIs) {
     curDesktopSecInfo |= LABEL_SECURITY_INFORMATION;
   }
-  PSECURITY_DESCRIPTOR curDesktopSd = nullptr;
   DWORD curDesktopSdSize = 0;
-  if (!::GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
+  if (!::GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, nullptr,
                                curDesktopSdSize, &curDesktopSdSize) &&
                                ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
-  curDesktopSd = (PSECURITY_DESCRIPTOR) ::calloc(curDesktopSdSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, curDesktopSd);
+  MAKE_UNIQUE_LEN(PSECURITY_DESCRIPTOR, curDesktopSd, curDesktopSdSize);
   if (!::GetUserObjectSecurity(curDesktop, &curDesktopSecInfo, curDesktopSd,
                                curDesktopSdSize, &curDesktopSdSize)) {
     return false;
@@ -186,17 +184,12 @@ WindowsSandboxLauncher::CreateDesktop(const Sid& aCustomSid)
      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
-  PSECURITY_DESCRIPTOR modifiedCurDesktopSd =
-                            (PSECURITY_DESCRIPTOR) ::calloc(curDesktopSdSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, modifiedCurDesktopSd);
-  PACL curDesktopDacl = (PACL) ::calloc(curDesktopDaclSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, curDesktopDacl);
-  PACL curDesktopSacl = (PACL) ::calloc(curDesktopSaclSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, curDesktopSacl);
-  PSID curDesktopOwner = (PSID) ::calloc(curDesktopOwnerSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, curDesktopOwner);
-  PSID curDesktopPrimaryGroup = (PSID) ::calloc(curDesktopPrimaryGroupSize, 1);
-  LOKI_ON_BLOCK_EXIT(::free, curDesktopPrimaryGroup);
+  MAKE_UNIQUE_LEN(PSECURITY_DESCRIPTOR, modifiedCurDesktopSd, curDesktopSdSize);
+  MAKE_UNIQUE_LEN(PACL, curDesktopDacl, curDesktopDaclSize);
+  MAKE_UNIQUE_LEN(PACL, curDesktopSacl, curDesktopSaclSize);
+  MAKE_UNIQUE_LEN(PSID, curDesktopOwner, curDesktopOwnerSize);
+  MAKE_UNIQUE_LEN(PSID, curDesktopPrimaryGroup, curDesktopPrimaryGroupSize);
+
   // This call is effectively making a copy of curDesktopSd (which is self-
   // relative) as an absolute security descriptor which we will modify. These
   // modifications are applied to the *current* desktop's DACL, not the new
@@ -242,8 +235,8 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
 {
   // 4. Create the job object
   SECURITY_ATTRIBUTES jobSa = {sizeof(jobSa), nullptr, TRUE};
-  aJob.Set(::CreateJobObject(&jobSa, nullptr));
-  if (!aJob.IsValid()) {
+  aJob.reset(::CreateJobObject(&jobSa, nullptr));
+  if (!aJob) {
     return false;
   }
   // 4a. Assign basic limits. This will prevent the sandboxed process from
@@ -252,7 +245,7 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
   ZeroMemory(&basicLimits, sizeof(basicLimits));
   basicLimits.LimitFlags = JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
   basicLimits.ActiveProcessLimit = 1;
-  if (!::SetInformationJobObject(aJob, JobObjectBasicLimitInformation,
+  if (!::SetInformationJobObject(aJob.get(), JobObjectBasicLimitInformation,
                                  &basicLimits, sizeof(basicLimits))) {
     return false;
   }
@@ -268,8 +261,8 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
                                  JOB_OBJECT_UILIMIT_READCLIPBOARD |
                                  JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS |
                                  JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
-  if (!::SetInformationJobObject(aJob, JobObjectBasicUIRestrictions, &uiLimits,
-                                 sizeof(uiLimits))) {
+  if (!::SetInformationJobObject(aJob.get(), JobObjectBasicUIRestrictions,
+                                 &uiLimits, sizeof(uiLimits))) {
     return false;
   }
   return true;
@@ -299,7 +292,7 @@ WindowsSandboxLauncher::Init()
   OSVERSIONINFO osv = {sizeof(osv)};
   if (!::GetVersionEx(&osv)) {
     return false;
-  } 
+  }
   mHasWinVistaAPIs = osv.dwMajorVersion >= 6;
   mHasWin8APIs = osv.dwMajorVersion > 6 ||
           osv.dwMajorVersion == 6 && osv.dwMinorVersion >= 2;
@@ -323,26 +316,25 @@ bool
 WindowsSandboxLauncher::GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf,
                                             size_t aBufCount)
 {
-  if (!aToken.IsValid() || !aBuf || !aBufCount) {
+  if (!aToken || !aBuf || !aBufCount) {
     return false;
   }
   if (mHasWinVistaAPIs) {
-    HMODULE shell32 = ::LoadLibrary(L"shell32.dll");
+    MAKE_UNIQUE_MODULE_HANDLE(shell32, L"shell32.dll");
     if (!shell32) {
       return false;
     }
-    LOKI_ON_BLOCK_EXIT(::FreeLibrary, shell32);
     SHGETKNOWNFOLDERPATH pSHGetKnownFolderPath = (SHGETKNOWNFOLDERPATH)
-                              ::GetProcAddress(shell32, "SHGetKnownFolderPath");
+                        ::GetProcAddress(shell32.get(), "SHGetKnownFolderPath");
     if (!pSHGetKnownFolderPath) {
       return false;
     }
     PWSTR shWorkingDir = nullptr;
-    if (FAILED(pSHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0, aToken,
+    if (FAILED(pSHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0, aToken.get(),
                                      &shWorkingDir))) {
       return false;
     }
-    LOKI_ON_BLOCK_EXIT(::CoTaskMemFree, shWorkingDir);
+    MAKE_UNIQUE_HANDLE(shWorkingDirUniq, shWorkingDir, &::CoTaskMemFree);
     if (::wcslen(shWorkingDir) > aBufCount - 1) {
       return false;
     }
@@ -365,12 +357,13 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
     return false;
   }
   mozilla::Sid logonSid;
-  ScopedHandle restrictedToken, impersonationToken;
+  DECLARE_UNIQUE_KERNEL_HANDLE(restrictedToken);
+  DECLARE_UNIQUE_KERNEL_HANDLE(impersonationToken);
   if (!CreateTokens(customSid, restrictedToken, impersonationToken, logonSid)) {
     return false;
   }
   mDesktop = CreateDesktop(customSid);
-  ScopedHandle job;
+  DECLARE_UNIQUE_KERNEL_HANDLE(job);
   if (!CreateJob(job)) {
     return false;
   }
@@ -380,18 +373,16 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   oss << L" ";
   oss << WindowsSandbox::SWITCH_JOB_HANDLE;
   oss << L" ";
-  oss << hex << job;
+  oss << hex << job.get();
   // 6. Set the working directory. With low integrity levels on Vista most
   //    directories are inaccessible.
   wchar_t workingDir[MAX_PATH + 1] = {0};
-  if (!GetWorkingDirectory(restrictedToken, workingDir,
-                           sizeof(workingDir)/sizeof(workingDir[0]))) {
+  if (!GetWorkingDirectory(restrictedToken, workingDir, ArrayLength(workingDir))) {
     return false;
   }
   // 7. Initialize the explicit list of handles to inherit (Vista+).
   bool result = false;
-  LPPROC_THREAD_ATTRIBUTE_LIST attrList = nullptr;
-  LOKI_ON_BLOCK_EXIT(::free, attrList);
+  DECLARE_UNIQUE_LEN(LPPROC_THREAD_ATTRIBUTE_LIST, attrList);
   DELETEPROCTHREADATTRIBUTELIST pDeleteProcThreadAttributeList = nullptr;
   if (mHasWinVistaAPIs) {
     SIZE_T attrListSize = 0;
@@ -412,21 +403,21 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
         GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
       return false;
     }
-    LPPROC_THREAD_ATTRIBUTE_LIST attrList = (LPPROC_THREAD_ATTRIBUTE_LIST) ::calloc(attrListSize, 1);
+    ALLOC_UNIQUE_LEN(attrList, attrListSize);
     if (!pInitializeProcThreadAttributeList(attrList, 1, 0, &attrListSize)) {
       return false;
     }
     size_t handleCount = mHandlesToInherit.size();
-    HANDLE *inheritableHandles = new HANDLE[mHandlesToInherit.size() + 2];
-    memcpy(inheritableHandles, &mHandlesToInherit[0],
+    auto inheritableHandles = std::make_unique<HANDLE[]>(handleCount + 2);
+    memcpy(inheritableHandles.get(), &mHandlesToInherit[0],
            handleCount * sizeof(HANDLE));
-    inheritableHandles[handleCount++] = impersonationToken;
-    inheritableHandles[handleCount++] = job;
+    inheritableHandles[handleCount++] = impersonationToken.get();
+    inheritableHandles[handleCount++] = job.get();
     result = !!pUpdateProcThreadAttribute(attrList, 0,
                                           PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                          inheritableHandles, handleCount *
-                                          sizeof(HANDLE), nullptr, nullptr);
-    delete[] inheritableHandles; inheritableHandles = nullptr;
+                                          inheritableHandles.get(),
+                                          handleCount * sizeof(HANDLE), nullptr,
+                                          nullptr);
     if (!result) {
       pDeleteProcThreadAttributeList(attrList);
       return false;
@@ -451,24 +442,24 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   }
   SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, FALSE};
   PROCESS_INFORMATION procInfo;
-  result = !!::CreateProcessAsUser(restrictedToken, aExecutablePath,
+  result = !!::CreateProcessAsUser(restrictedToken.get(), aExecutablePath,
                                    const_cast<wchar_t*>(oss.str().c_str()), &sa,
                                    &sa, TRUE, creationFlags, L"", workingDir,
                                    &siex.StartupInfo, &procInfo);
-  ScopedHandle childProcess(procInfo.hProcess);
-  ScopedHandle mainThread(procInfo.hThread);
+  ScopedHandle childProcess(procInfo.hProcess, &::CloseHandle);
+  ScopedHandle mainThread(procInfo.hThread, &::CloseHandle);
   if (mHasWinVistaAPIs) {
     pDeleteProcThreadAttributeList(attrList);
   }
   if (!result) {
     return false;
   }
-  if (!::SetThreadToken(&procInfo.hThread, impersonationToken) ||
-      ::ResumeThread(mainThread) == static_cast<DWORD>(-1)) {
+  if (!::SetThreadToken(&procInfo.hThread, impersonationToken.get()) ||
+      ::ResumeThread(mainThread.get()) == static_cast<DWORD>(-1)) {
     ::TerminateProcess(procInfo.hProcess, 1);
     return false;
   }
-  mProcess = childProcess.Take();
+  mProcess = childProcess.release();
   return true;
 }
 
