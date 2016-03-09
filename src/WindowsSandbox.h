@@ -73,6 +73,7 @@ private:
   std::vector<HANDLE> mHandlesToInherit;
   bool    mHasWinVistaAPIs;
   bool    mHasWin8APIs;
+  bool    mHasWin10APIs;
   DWORD64 mMitigationPolicies;
   HANDLE  mProcess;
   HDESK   mDesktop;

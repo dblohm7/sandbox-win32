@@ -11,6 +11,7 @@
 #include "sidattrs.h"
 #include <sstream>
 #include <shlobj.h>
+#include <VersionHelpers.h>
 
 using std::wistringstream;
 using std::wostringstream;
@@ -127,8 +128,8 @@ WindowsSandbox::SetMitigations(const DWORD64 aMitigations)
                                       &win32kPolicy, sizeof(win32kPolicy));
   }
 #if _WIN32_WINNT >= 0x0A00
-  if (aMitigations &
-      PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON) {
+  if (IsWindows10OrGreater() && (aMitigations &
+      PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON)) {
     PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signPolicy = {0};
     signPolicy.MicrosoftSignedOnly = 1;
     ok &= pSetProcessMitigationPolicy(ProcessSignaturePolicy,
@@ -393,6 +394,7 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
 WindowsSandboxLauncher::WindowsSandboxLauncher()
   : mHasWinVistaAPIs(false)
   , mHasWin8APIs(false)
+  , mHasWin10APIs(false)
   , mMitigationPolicies(0)
   , mProcess(NULL)
   , mDesktop(NULL)
@@ -419,7 +421,14 @@ WindowsSandboxLauncher::Init(DWORD64 aMitigationPolicies)
   mHasWinVistaAPIs = osv.dwMajorVersion >= 6;
   mHasWin8APIs = osv.dwMajorVersion > 6 ||
           osv.dwMajorVersion == 6 && osv.dwMinorVersion >= 2;
+  mHasWin10APIs = osv.dwMajorVersion >= 10;
   mMitigationPolicies = aMitigationPolicies;
+#if _WIN32_WINNT >= 0x0A00
+  if (!mHasWin10APIs) {
+    mMitigationPolicies &=
+      ~PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON;
+  }
+#endif
   return true;
 }
 
