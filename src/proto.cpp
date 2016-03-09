@@ -16,6 +16,7 @@
 #include "WindowsSandbox.h"
 
 using std::wcout;
+using std::wcerr;
 using std::endl;
 using std::wostringstream;
 using std::hex;
@@ -123,6 +124,7 @@ int wmain(int argc, wchar_t* argv[])
     wostringstream oss;
     oss << argv[0] << L" " << argv[1];
     if (!sboxLauncher.Launch(argv[0], oss.str().c_str())) {
+      wcerr << L"Failed to launch" << endl;
       return EXIT_FAILURE;
     }
     if (!sboxLauncher.Wait(INFINITE)) {

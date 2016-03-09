@@ -530,7 +530,13 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
     return false;
   }
   mWinsta = CreateWindowStation();
+  if (!mWinsta) {
+    return false;
+  }
   mDesktop = CreateDesktop(mWinsta, customSid);
+  if (!mDesktop) {
+    return false;
+  }
   DECLARE_UNIQUE_KERNEL_HANDLE(job);
   if (!CreateJob(job)) {
     return false;
