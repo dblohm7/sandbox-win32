@@ -245,7 +245,7 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
     return false;
   }
   // 2. Duplicate the process token for impersonation.
-  //    This will allow the sandbox to temporarily masquerade as a more 
+  //    This will allow the sandbox to temporarily masquerade as a more
   //    privileged process until it reverts to self.
   SidAttributes toRestrictImp;
   if (!toRestrictImp.CreateFromTokenGroups(processToken.get(),
@@ -260,8 +260,9 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
   tmp = NULL;
   // We need to duplicate the impersonation token to raise its impersonation
   // level to SecurityImpersonation, or else impersonation won't work.
+  SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
   result = !!DuplicateTokenEx(tmpImpToken.get(), TOKEN_IMPERSONATE | TOKEN_QUERY,
-                              nullptr, SecurityImpersonation,
+                              &sa, SecurityImpersonation,
                               TokenImpersonation, &tmp);
   if (!result) {
     return false;
@@ -557,6 +558,7 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   // 7. Initialize the explicit list of handles to inherit (Vista+).
   bool result = false;
   DECLARE_UNIQUE_LEN(LPPROC_THREAD_ATTRIBUTE_LIST, attrList);
+  std::unique_ptr<HANDLE[]> inheritableHandles;
   DELETEPROCTHREADATTRIBUTELIST pDeleteProcThreadAttributeList = nullptr;
   if (mHasWinVistaAPIs) {
     SIZE_T attrListSize = 0;
@@ -587,11 +589,9 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
                                             &attrListSize)) {
       return false;
     }
-    std::unique_ptr<_PROC_THREAD_ATTRIBUTE_LIST,
-      decltype(pDeleteProcThreadAttributeList)> listDeleter(attrList,
-          pDeleteProcThreadAttributeList);
+    MAKE_UNIQUE_HANDLE(listDeleter, attrList, pDeleteProcThreadAttributeList);
     size_t handleCount = mHandlesToInherit.size();
-    auto inheritableHandles = std::make_unique<HANDLE[]>(handleCount + 2);
+    inheritableHandles = std::make_unique<HANDLE[]>(handleCount + 2);
     memcpy(inheritableHandles.get(), &mHandlesToInherit[0],
            handleCount * sizeof(HANDLE));
     inheritableHandles[handleCount++] = impersonationToken.get();
@@ -611,6 +611,8 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
     if (!result) {
       return false;
     }
+    // Can't delete attrList yet
+    listDeleter.release();
   }
   // 8. Create the process using the restricted token
   STARTUPINFOEX siex;
@@ -638,8 +640,8 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
                                    const_cast<wchar_t*>(oss.str().c_str()), &sa,
                                    &sa, TRUE, creationFlags, L"", workingDir,
                                    &siex.StartupInfo, &procInfo);
-  ScopedHandle childProcess(procInfo.hProcess, &::CloseHandle);
-  ScopedHandle mainThread(procInfo.hThread, &::CloseHandle);
+  MAKE_UNIQUE_KERNEL_HANDLE(childProcess, procInfo.hProcess);
+  MAKE_UNIQUE_KERNEL_HANDLE(mainThread, procInfo.hThread);
   if (mHasWinVistaAPIs) {
     pDeleteProcThreadAttributeList(attrList);
   }

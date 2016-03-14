@@ -13,7 +13,7 @@
 namespace mozilla {
 
 class Sid
-{ 
+{
 public:
   Sid();
   Sid(const Sid& aOther);
