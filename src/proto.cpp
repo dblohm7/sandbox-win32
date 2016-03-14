@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <cstring>
-#include <sstream>
 #include <windows.h>
 #include <sddl.h>
 
@@ -18,7 +17,6 @@
 using std::wcout;
 using std::wcerr;
 using std::endl;
-using std::wostringstream;
 using std::hex;
 using mozilla::WindowsSandbox;
 using mozilla::WindowsSandboxLauncher;
@@ -121,9 +119,7 @@ int wmain(int argc, wchar_t* argv[])
   } else if (argc == 2) {
     WindowsSandboxLauncher sboxLauncher;
     sboxLauncher.Init();
-    wostringstream oss;
-    oss << argv[0] << L" " << argv[1];
-    if (!sboxLauncher.Launch(argv[0], oss.str().c_str())) {
+    if (!sboxLauncher.Launch(argv[0], argv[1])) {
       wcerr << L"Failed to launch" << endl;
       return EXIT_FAILURE;
     }

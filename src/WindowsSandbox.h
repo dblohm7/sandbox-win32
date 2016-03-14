@@ -36,6 +36,7 @@ protected:
   virtual void OnFini() = 0;
 
 private:
+  bool ValidateJobHandle(HANDLE aJob);
   bool SetMitigations(const DWORD64 aMitigations);
   bool DropProcessIntegrityLevel();
 };
@@ -71,6 +72,7 @@ private:
   HDESK CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid);
   bool CreateJob(ScopedHandle& aJob);
   bool GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf, size_t aBufLen);
+  std::unique_ptr<wchar_t[]> CreateAbsolutePath(const wchar_t* aInputPath);
 
   std::vector<HANDLE> mHandlesToInherit;
   bool    mHasWinVistaAPIs;

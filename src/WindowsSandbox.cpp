@@ -11,6 +11,7 @@
 #include "sidattrs.h"
 #include <sstream>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <VersionHelpers.h>
 
 using std::wistringstream;
@@ -147,6 +148,21 @@ WindowsSandbox::SetMitigations(const DWORD64 aMitigations)
 }
 
 bool
+WindowsSandbox::ValidateJobHandle(HANDLE aJob)
+{
+  JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info;
+  BOOL ok = ::QueryInformationJobObject(aJob,
+                                        JobObjectBasicAccountingInformation,
+                                        &info, sizeof(info), nullptr);
+#ifdef DEBUG
+  if (!ok) {
+    DebugBreak();
+  }
+#endif
+  return !!ok;
+}
+
+bool
 WindowsSandbox::Init(int aArgc, wchar_t* aArgv[])
 {
   DECLARE_UNIQUE_KERNEL_HANDLE(job);
@@ -161,16 +177,16 @@ WindowsSandbox::Init(int aArgc, wchar_t* aArgv[])
       job.reset(reinterpret_cast<HANDLE>(uijob));
     }
   }
-  if (!SetMitigations(GetDeferredMitigationPolicies())) {
-    return false;
-  }
-  bool ok = OnPrivInit();
-  ok = ::RevertToSelf() && ok;
-  ok = DropProcessIntegrityLevel() && ok;
-  ok = ::AssignProcessToJobObject(job.get(), ::GetCurrentProcess()) && ok;
+  bool ok = ValidateJobHandle(job.get());
+  ok = ok && OnPrivInit();
+  ok = ok && ::RevertToSelf();
+  ok = ok && DropProcessIntegrityLevel();
+  ok = ok && ::AssignProcessToJobObject(job.get(), ::GetCurrentProcess());
+  ok = ok && SetMitigations(GetDeferredMitigationPolicies());
   if (!ok) {
     return ok;
   }
+  job.reset();
   return OnInit();
 }
 
@@ -515,10 +531,27 @@ WindowsSandboxLauncher::GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf,
   return true;
 }
 
+std::unique_ptr<wchar_t[]>
+WindowsSandboxLauncher::CreateAbsolutePath(const wchar_t* aInputPath)
+{
+  wchar_t buf[MAX_PATH + 1] = {0};
+  if (!_wfullpath(buf, aInputPath, ArrayLength(buf))) {
+    return nullptr;
+  }
+  ::PathAddExtensionW(buf, nullptr);
+  auto result(std::make_unique<wchar_t[]>(wcslen(buf) + 1));
+  wcscpy(result.get(), buf);
+  return result;
+}
+
 bool
 WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
                                const wchar_t* aBaseCmdLine)
 {
+  auto absExePath = CreateAbsolutePath(aExecutablePath);
+  if (!absExePath) {
+    return false;
+  }
   // customSid guards against the SetThreadDesktop() security hole
   mozilla::Sid customSid;
   if (!customSid.InitCustom()) {
@@ -544,6 +577,8 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   }
   // 5. Build the command line string
   wostringstream oss;
+  oss << absExePath.get();
+  oss << L" ";
   oss << aBaseCmdLine;
   oss << L" ";
   oss << WindowsSandbox::SWITCH_JOB_HANDLE;
@@ -636,7 +671,7 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   }
   SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, FALSE};
   PROCESS_INFORMATION procInfo;
-  result = !!::CreateProcessAsUser(restrictedToken.get(), aExecutablePath,
+  result = !!::CreateProcessAsUser(restrictedToken.get(), absExePath.get(),
                                    const_cast<wchar_t*>(oss.str().c_str()), &sa,
                                    &sa, TRUE, creationFlags, L"", workingDir,
                                    &siex.StartupInfo, &procInfo);
