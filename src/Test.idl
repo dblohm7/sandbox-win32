@@ -1,0 +1,7 @@
+import "unknwn.idl";
+
+[object, uuid(e7199d1b-14ff-4dc8-b76e-3d0c860f1f4b)]
+interface ITest : IUnknown
+{
+  HRESULT Foo([in] long aParam, [out] long *aOutVal);
+};

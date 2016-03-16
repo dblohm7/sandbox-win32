@@ -6,8 +6,9 @@
 
 #include <cstdlib>
 #include <iostream>
-#include <cstring>
+
 #include <windows.h>
+#include <objbase.h>
 #include <sddl.h>
 
 #include "dacl.h"
@@ -17,13 +18,11 @@
 using std::wcout;
 using std::wcerr;
 using std::endl;
-using std::hex;
-using mozilla::WindowsSandbox;
 using mozilla::WindowsSandboxLauncher;
 
 namespace {
 
-class COMTestSandbox : public WindowsSandbox
+class COMTestSandbox : public mozilla::WindowsSandbox
 {
 public:
   explicit COMTestSandbox()
@@ -50,12 +49,16 @@ COMTestSandbox::OnPrivInit()
 bool
 COMTestSandbox::OnInit()
 {
+  if (FAILED(::CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
+    return false;
+  }
   return true;
 }
 
 void
 COMTestSandbox::OnFini()
 {
+  ::CoUninitialize();
 }
 
 }
