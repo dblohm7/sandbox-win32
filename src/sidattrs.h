@@ -19,7 +19,8 @@ public:
   {
     FILTER_NOTHING = 0,
     FILTER_INTEGRITY = 1,
-    FILTER_RESTRICTED_DISABLE = 2
+    FILTER_RESTRICTED_DISABLE = 2,
+    FILTER_ADD_RESTRICTED = 4
   };
   bool CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
                              Sid* aLogonSid = nullptr);

@@ -52,6 +52,9 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
     }
     ++sidCount;
   }
+  if (aFilterFlags & FILTER_ADD_RESTRICTED) {
+    ++sidCount;
+  }
   // Reserve space in the containers so that the vector's buffers don't get
   // reallocated.
   mSidAttrs.reserve(sidCount);
@@ -87,6 +90,9 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
       return false;
     }
     Push(newSid);
+  }
+  if (aFilterFlags & FILTER_ADD_RESTRICTED) {
+    Push(mozilla::Sid::GetRestricted());
   }
   return true;
 }

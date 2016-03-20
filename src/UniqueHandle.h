@@ -6,6 +6,8 @@
 
 #define UNIQUE_HANDLE_TYPE(handleType, closeFnPtr) \
   std::unique_ptr<std::remove_pointer<handleType>::type, decltype(closeFnPtr)>
+#define UNIQUE_HANDLE_DEPENDENT_TYPE(handleType, closeFnPtr) \
+  std::unique_ptr<typename std::remove_pointer<handleType>::type, decltype(closeFnPtr)>
 #define MAKE_UNIQUE_HANDLE(name, newExpr, closeFnPtr) \
   UNIQUE_HANDLE_TYPE(decltype(newExpr), closeFnPtr) name(newExpr, closeFnPtr)
 
@@ -20,6 +22,9 @@ typedef UNIQUE_HANDLE_TYPE(HANDLE, &::CloseHandle) UniqueKernelHandle;
 typedef UNIQUE_HANDLE_TYPE(HMODULE, &::FreeLibrary) UniqueModuleHandle;
 #define MAKE_UNIQUE_MODULE_HANDLE(name, path) \
   MAKE_UNIQUE_HANDLE(name, ::LoadLibraryW(path), &::FreeLibrary)
+
+template <typename T>
+using UniqueFileMapping = UNIQUE_HANDLE_DEPENDENT_TYPE(T, &::UnmapViewOfFile);
 
 #endif // _WIN32_WINNT
 

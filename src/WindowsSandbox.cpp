@@ -170,7 +170,7 @@ WindowsSandbox::Init(int aArgc, wchar_t* aArgv[])
     if (!::wcscmp(aArgv[i], SWITCH_JOB_HANDLE) && i + 1 < aArgc) {
       uintptr_t uijob;
       std::wistringstream iss(aArgv[++i]);
-      iss >> uijob;
+      iss >> hex >> uijob;
       if (!iss) {
         return false;
       }
@@ -233,6 +233,12 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
                                        &aLogonSid)) {
     return false;
   }
+  // Now that we have aLogonSid, build a security descriptor that can be used
+  // for securable objects that need to be inherited by the sandboxed process.
+  if (!BuildInheritableSecurityDescriptor(aLogonSid)) {
+    return false;
+  }
+  // Create the restricted token...
   SID_AND_ATTRIBUTES toRestrict[] = {{mozilla::Sid::GetEveryone()},
                                      {mozilla::Sid::GetUsers()},
                                      {mozilla::Sid::GetRestricted()},
@@ -249,23 +255,31 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
     return false;
   }
   // The restricted token needs an updated default DACL
-  mozilla::Dacl dacl;
+  Dacl dacl;
   dacl.AddAllowedAce(mozilla::Sid::GetLocalSystem(), GENERIC_ALL);
   dacl.AddAllowedAce(mozilla::Sid::GetAdministrators(), GENERIC_ALL);
   dacl.AddAllowedAce(aLogonSid, GENERIC_ALL);
   TOKEN_DEFAULT_DACL tokenDacl;
   ZeroMemory(&tokenDacl, sizeof(tokenDacl));
   tokenDacl.DefaultDacl = (PACL)dacl;
-  if (!SetTokenInformation(aRestrictedToken.get(), TokenDefaultDacl, &tokenDacl,
-                           sizeof(tokenDacl))) {
+  if (!tokenDacl.DefaultDacl) {
+    return false;
+  }
+  if (!::SetTokenInformation(aRestrictedToken.get(), TokenDefaultDacl,
+                             &tokenDacl, sizeof(tokenDacl))) {
     return false;
   }
   // 2. Duplicate the process token for impersonation.
   //    This will allow the sandbox to temporarily masquerade as a more
   //    privileged process until it reverts to self.
+
+  //    NOTE: FILTER_ADD_RESTRICTED needed here because CreateRestrictedToken
+  //          always requires the Restricted SID as part of the SidsToRestrict
+  //          parameter.
   SidAttributes toRestrictImp;
   if (!toRestrictImp.CreateFromTokenGroups(processToken.get(),
-                                           SidAttributes::FILTER_INTEGRITY)) {
+                                           SidAttributes::FILTER_INTEGRITY |
+                                           SidAttributes::FILTER_ADD_RESTRICTED)) {
     return false;
   }
   tmp = NULL;
@@ -290,9 +304,13 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
 HWINSTA
 WindowsSandboxLauncher::CreateWindowStation()
 {
+  SECURITY_ATTRIBUTES sa;
+  if (!GetInheritableSecurityDescriptor(sa, FALSE)) {
+    return NULL;
+  }
   DWORD desiredAccess = GENERIC_READ | WINSTA_CREATEDESKTOP;
   HWINSTA winsta = ::CreateWindowStation(nullptr, 0,
-                                         desiredAccess, nullptr);
+                                         desiredAccess, &sa);
   return winsta;
 }
 
@@ -385,8 +403,10 @@ WindowsSandboxLauncher::CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid)
   }
   // 3e. Temporarily set the window station to the sandbox window station
   HWINSTA curWinsta = ::GetProcessWindowStation();
-  if (!::SetProcessWindowStation(aWinsta)) {
-    return nullptr;
+  if (aWinsta) {
+    if (!::SetProcessWindowStation(aWinsta)) {
+      return nullptr;
+    }
   }
   // 3f. Create the new desktop using the absolute security descriptor
   SECURITY_ATTRIBUTES newDesktopSa = {sizeof(newDesktopSa), curDesktopSd, FALSE};
@@ -394,8 +414,10 @@ WindowsSandboxLauncher::CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid)
                                   nullptr, 0, DESKTOP_CREATEWINDOW,
                                   &newDesktopSa);
   // 3g. Revert to our previous window station
-  if (!::SetProcessWindowStation(curWinsta)) {
-    // uh-oh! we should warn!
+  if (aWinsta) {
+    if (!::SetProcessWindowStation(curWinsta)) {
+      // uh-oh! we should warn!
+    }
   }
   return desktop;
 }
@@ -404,7 +426,10 @@ bool
 WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
 {
   // 4. Create the job object
-  SECURITY_ATTRIBUTES jobSa = {sizeof(jobSa), nullptr, TRUE};
+  SECURITY_ATTRIBUTES jobSa;
+  if (!GetInheritableSecurityDescriptor(jobSa)) {
+    return false;
+  }
   aJob.reset(::CreateJobObject(&jobSa, nullptr));
   if (!aJob) {
     return false;
@@ -439,7 +464,8 @@ WindowsSandboxLauncher::CreateJob(ScopedHandle& aJob)
 }
 
 WindowsSandboxLauncher::WindowsSandboxLauncher()
-  : mHasWinVistaAPIs(false)
+  : mInitFlags(eInitNormal)
+  , mHasWinVistaAPIs(false)
   , mHasWin8APIs(false)
   , mHasWin10APIs(false)
   , mMitigationPolicies(0)
@@ -447,6 +473,7 @@ WindowsSandboxLauncher::WindowsSandboxLauncher()
   , mWinsta(NULL)
   , mDesktop(NULL)
 {
+  ZeroMemory(&mInheritableSd, sizeof(mInheritableSd));
 }
 
 WindowsSandboxLauncher::~WindowsSandboxLauncher()
@@ -463,8 +490,9 @@ WindowsSandboxLauncher::~WindowsSandboxLauncher()
 }
 
 bool
-WindowsSandboxLauncher::Init(DWORD64 aMitigationPolicies)
+WindowsSandboxLauncher::Init(InitFlags aInitFlags, DWORD64 aMitigationPolicies)
 {
+  mInitFlags = aInitFlags;
   OSVERSIONINFO osv = {sizeof(osv)};
   if (!::GetVersionEx(&osv)) {
     return false;
@@ -563,9 +591,11 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   if (!CreateTokens(customSid, restrictedToken, impersonationToken, logonSid)) {
     return false;
   }
-  mWinsta = CreateWindowStation();
-  if (!mWinsta) {
-    return false;
+  if (!(mInitFlags & eInitNoSeparateWindowStation)) {
+    mWinsta = CreateWindowStation();
+    if (!mWinsta) {
+      return false;
+    }
   }
   mDesktop = CreateDesktop(mWinsta, customSid);
   if (!mDesktop) {
@@ -652,10 +682,14 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   // 8. Create the process using the restricted token
   STARTUPINFOEX siex;
   ZeroMemory(&siex, sizeof(siex));
-  auto winstaName = GetWindowStationName(mWinsta);
-  std::wostringstream ssDesktop;
-  ssDesktop << winstaName.get() << L"\\" << WindowsSandbox::DESKTOP_NAME;
-  siex.StartupInfo.lpDesktop = (LPWSTR)ssDesktop.str().c_str();
+  if (mWinsta) {
+    auto winstaName = GetWindowStationName(mWinsta);
+    std::wostringstream ssDesktop;
+    ssDesktop << winstaName.get() << L"\\" << WindowsSandbox::DESKTOP_NAME;
+    siex.StartupInfo.lpDesktop = (LPWSTR)ssDesktop.str().c_str();
+  } else {
+    siex.StartupInfo.lpDesktop = (LPWSTR)WindowsSandbox::DESKTOP_NAME;
+  }
   DWORD creationFlags = CREATE_SUSPENDED;
   if (mHasWinVistaAPIs) {
     siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
@@ -675,6 +709,7 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
                                    const_cast<wchar_t*>(oss.str().c_str()), &sa,
                                    &sa, TRUE, creationFlags, L"", workingDir,
                                    &siex.StartupInfo, &procInfo);
+  // TODO: Make deleter for childProcess that does terminate + close
   MAKE_UNIQUE_KERNEL_HANDLE(childProcess, procInfo.hProcess);
   MAKE_UNIQUE_KERNEL_HANDLE(mainThread, procInfo.hThread);
   if (mHasWinVistaAPIs) {
@@ -683,12 +718,56 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   if (!result) {
     return false;
   }
-  if (!::SetThreadToken(&procInfo.hThread, impersonationToken.get()) ||
-      ::ResumeThread(mainThread.get()) == static_cast<DWORD>(-1)) {
+  if (!::SetThreadToken(&procInfo.hThread, impersonationToken.get())) {
+    ::TerminateProcess(procInfo.hProcess, 1);
+    return false;
+  }
+  if (!PreResume()) {
+    ::TerminateProcess(procInfo.hProcess, 1);
+    return false;
+  }
+  if (::ResumeThread(mainThread.get()) == static_cast<DWORD>(-1)) {
     ::TerminateProcess(procInfo.hProcess, 1);
     return false;
   }
   mProcess = childProcess.release();
+  return true;
+}
+
+bool
+WindowsSandboxLauncher::BuildInheritableSecurityDescriptor(const Sid& aLogonSid)
+{
+  mInheritableDacl.Clear();
+  mInheritableDacl.AddAllowedAce(mozilla::Sid::GetLocalSystem(), GENERIC_ALL);
+  mInheritableDacl.AddAllowedAce(mozilla::Sid::GetAdministrators(), GENERIC_ALL);
+  mInheritableDacl.AddAllowedAce(aLogonSid, GENERIC_ALL);
+
+  if (!::InitializeSecurityDescriptor(&mInheritableSd,
+                                      SECURITY_DESCRIPTOR_REVISION)) {
+    mInheritableDacl.Clear();
+    return false;
+  }
+  PACL pacl = (PACL) mInheritableDacl;
+  if (!pacl) {
+    mInheritableDacl.Clear();
+    return false;
+  }
+  if (!::SetSecurityDescriptorDacl(&mInheritableSd, TRUE, pacl, FALSE)) {
+    mInheritableDacl.Clear();
+    return false;
+  }
+  return true;
+}
+
+bool
+WindowsSandboxLauncher::GetInheritableSecurityDescriptor(SECURITY_ATTRIBUTES &aSa,
+                                                         const BOOL aInheritable)
+{
+  PACL pacl = (PACL) mInheritableDacl;
+  if (!pacl) {
+    return false;
+  }
+  aSa = {sizeof(aSa), &mInheritableSd, aInheritable};
   return true;
 }
 

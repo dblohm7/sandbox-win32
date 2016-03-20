@@ -130,7 +130,7 @@ Sid::GetTrustee(TRUSTEE& aTrustee) const
     return;
   }
   ::BuildTrusteeWithSid(&aTrustee, mSid);
-} 
+}
 
 bool
 Sid::operator==(PSID aOther) const

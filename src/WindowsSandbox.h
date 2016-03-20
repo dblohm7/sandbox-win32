@@ -8,6 +8,7 @@
 #define __WINDOWSSANDBOX_H
 
 #include <windows.h>
+#include "Dacl.h"
 #include "Sid.h"
 #include "UniqueHandle.h"
 #include <vector>
@@ -45,9 +46,17 @@ class WindowsSandboxLauncher
 {
 public:
   WindowsSandboxLauncher();
-  ~WindowsSandboxLauncher();
+  virtual ~WindowsSandboxLauncher();
 
-  bool Init(DWORD64 aMitigationPolicies = DEFAULT_MITIGATION_POLICIES);
+  enum InitFlags
+  {
+    eInitNormal = 0,
+    eInitNoSeparateWindowStation = 1
+  };
+
+  bool Init(InitFlags aInitFlags = eInitNormal,
+            DWORD64 aMitigationPolicies = DEFAULT_MITIGATION_POLICIES);
+
   inline void AddHandleToInherit(HANDLE aHandle)
   {
     if (aHandle) {
@@ -57,8 +66,13 @@ public:
   bool Launch(const wchar_t* aExecutablePath, const wchar_t* aBaseCmdLine);
   bool Wait(unsigned int aTimeoutMs) const;
   bool IsSandboxRunning() const;
+  bool GetInheritableSecurityDescriptor(SECURITY_ATTRIBUTES& aSa,
+                                        const BOOL aInheritable = TRUE);
 
   static const DWORD64 DEFAULT_MITIGATION_POLICIES;
+
+protected:
+  virtual bool PreResume() { return true; }
 
 private:
   bool CreateSidList(HANDLE aToken, SID_AND_ATTRIBUTES*& aOutput,
@@ -73,7 +87,9 @@ private:
   bool CreateJob(ScopedHandle& aJob);
   bool GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf, size_t aBufLen);
   std::unique_ptr<wchar_t[]> CreateAbsolutePath(const wchar_t* aInputPath);
+  bool BuildInheritableSecurityDescriptor(const Sid& aLogonSid);
 
+  InitFlags mInitFlags;
   std::vector<HANDLE> mHandlesToInherit;
   bool    mHasWinVistaAPIs;
   bool    mHasWin8APIs;
@@ -82,6 +98,8 @@ private:
   HANDLE  mProcess;
   HWINSTA mWinsta;
   HDESK   mDesktop;
+  Dacl    mInheritableDacl;
+  SECURITY_DESCRIPTOR mInheritableSd;
 };
 
 } // namespace mozilla

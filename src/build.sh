@@ -17,6 +17,7 @@ mt -manifest sandbox-win32.manifest -outputresource:proto.exe;#1
 midl -win32 -env win32 -Oicf Test.idl
 # NOTE: Need to #define WIN32 for 32-bit COM stuff... not sure why it uses that
 cl -Zi -EHsc -MD -LD -DWIN32 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -DREGISTER_PROXY_DLL Test_i.c Test_p.c dlldata.c rpcrt4.lib -FeITest.dll -link -def:ITest.def
-regsvr32 -s ITest.dll
-cl -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE comtest.cpp dacl.cpp sid.cpp sidattrs.cpp WindowsSandbox.cpp advapi32.lib user32.lib rpcrt4.lib ole32.lib shlwapi.lib
+# This needs to be run as Administrator
+# regsvr32 ITest.dll
+cl -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE comtest.cpp comarshal.cpp dacl.cpp sid.cpp sidattrs.cpp WindowsSandbox.cpp Test_i.c advapi32.lib user32.lib rpcrt4.lib ole32.lib shlwapi.lib delayimp.lib -link -delayload:user32.dll -delayload:shlwapi.dll
 mt -manifest sandbox-win32.manifest -outputresource:comtest.exe;#1
