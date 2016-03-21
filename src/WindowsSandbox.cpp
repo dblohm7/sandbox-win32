@@ -10,6 +10,8 @@
 #include "MakeUniqueLen.h"
 #include "sidattrs.h"
 #include <sstream>
+
+#include <aclapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <VersionHelpers.h>
@@ -304,13 +306,18 @@ WindowsSandboxLauncher::CreateTokens(const Sid& aCustomSid,
 HWINSTA
 WindowsSandboxLauncher::CreateWindowStation()
 {
-  SECURITY_ATTRIBUTES sa;
-  if (!GetInheritableSecurityDescriptor(sa, FALSE)) {
+  PACL pdacl = nullptr;
+  PSECURITY_DESCRIPTOR psd = nullptr;
+  if (::GetSecurityInfo(::GetProcessWindowStation(), SE_WINDOW_OBJECT,
+                        DACL_SECURITY_INFORMATION, nullptr, nullptr, &pdacl,
+                        nullptr, &psd) != ERROR_SUCCESS) {
     return NULL;
   }
+  SECURITY_ATTRIBUTES sa = {sizeof(sa), psd, FALSE};
   DWORD desiredAccess = GENERIC_READ | WINSTA_CREATEDESKTOP;
   HWINSTA winsta = ::CreateWindowStation(nullptr, 0,
                                          desiredAccess, &sa);
+  ::LocalFree(psd);
   return winsta;
 }
 

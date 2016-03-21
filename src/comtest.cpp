@@ -264,9 +264,12 @@ int wmain(int argc, wchar_t* argv[])
 {
   if (argc == 1) {
     WindowsSandboxLauncher sboxLauncher;
-    sboxLauncher.Init(WindowsSandboxLauncher::eInitNoSeparateWindowStation,
+    if (!sboxLauncher.Init(WindowsSandboxLauncher::eInitNoSeparateWindowStation,
                       WindowsSandboxLauncher::DEFAULT_MITIGATION_POLICIES ^
-                        PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON);
+                        PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES_ALWAYS_ON)) {
+      wcout << L"WindowsSandboxLauncher::Init failed" << endl;
+      return EXIT_FAILURE;
+    }
 
     UniqueFileMapping<BufDescriptor> sharedBuf(CreateSharedSection(),
                                                &UnmapViewOfFile);
