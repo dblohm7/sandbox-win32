@@ -1,0 +1,6 @@
+.gitignore
+WIN32LIBS = advapi32.lib delayimp.lib ole32.lib rpcrt4.lib shlwapi.lib user32.lib
+SANDBOXPDB = ../obj/sandbox/*.pdb
+: ../obj/comtest/*.obj ../lib/sandbox.lib ../obj/itest/Test_i.obj | ../obj/comtest/*.pdb ../obj/itest/Test_i.pdb $(SANDBOXPDB) |> cl -Zi -MD %f $(WIN32LIBS) -Fd%O.pdb -Fe%o -link -delayload:user32.dll -delayload:shlwapi.dll |> comtest.exe | %O.pdb %O.ilk
+: ../obj/proto/*.obj ../lib/sandbox.lib | ../obj/proto/*.pdb $(SANDBOXPDB) |> cl -Zi -MD %f $(WIN32LIBS) -Fd%O.pdb -Fe%o |> proto.exe | %O.pdb %O.ilk
+: ../obj/itest/*.obj | ../src/itest/ITest.def ../obj/itest/*.pdb $(SANDBOXPDB) |> cl -Zi -MD -LD %f rpcrt4.lib -Fd%O.pdb -Fe%o -link -def:../src/itest/ITest.def |> ITest.dll | %O.pdb %O.ilk %O.exp %O.lib

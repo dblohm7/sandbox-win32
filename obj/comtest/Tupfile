@@ -1,0 +1,2 @@
+.gitignore
+: foreach ../../src/comtest/*.cpp | ../itest/Test.h |> cl -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -I../../include -I../itest -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb
