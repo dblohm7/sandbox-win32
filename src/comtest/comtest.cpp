@@ -10,6 +10,7 @@
 
 #include <windows.h>
 #include <objbase.h>
+#include <oleacc.h> // For IAccessible
 #include <sddl.h>
 
 #include "dacl.h"
@@ -17,7 +18,6 @@
 #include "UniqueHandle.h"
 #include "WindowsSandbox.h"
 
-#include "Test.h"
 #include "comarshal.h"
 #include "mscom.h"
 
@@ -29,51 +29,204 @@ using mozilla::WindowsSandboxLauncher;
 
 namespace {
 
-_COM_SMARTPTR_TYPEDEF(ITest, __uuidof(ITest));
-
 struct BufDescriptor
 {
   int mLen;
   BYTE mData[0];
 };
 
-class TestImp : public ITest
+class TestAccessible : public IAccessible
 {
 public:
+  // IUnknown
   STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override;
   STDMETHODIMP_(ULONG) AddRef() override;
   STDMETHODIMP_(ULONG) Release() override;
 
-  STDMETHODIMP Foo(long aParam, long* aOutVal) override;
+  // IAccessible
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accParent( 
+      /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispParent) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accChildCount( 
+      /* [retval][out] */ long __RPC_FAR *pcountChildren) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accChild( 
+      /* [in] */ VARIANT varChild,
+      /* [retval][out] */ IDispatch __RPC_FAR *__RPC_FAR *ppdispChild) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accName( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszName) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accValue( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszValue) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accDescription( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszDescription) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accRole( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarRole) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accState( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarState) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accHelp( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszHelp) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accHelpTopic( 
+      /* [out] */ BSTR __RPC_FAR *pszHelpFile,
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ long __RPC_FAR *pidTopic) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accKeyboardShortcut( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszKeyboardShortcut) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accFocus( 
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarChild) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accSelection( 
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarChildren) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propget] */ HRESULT STDMETHODCALLTYPE get_accDefaultAction( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [retval][out] */ BSTR __RPC_FAR *pszDefaultAction) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id] */ HRESULT STDMETHODCALLTYPE accSelect( 
+      /* [in] */ long flagsSelect,
+      /* [optional][in] */ VARIANT varChild) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id] */ HRESULT STDMETHODCALLTYPE accLocation( 
+      /* [out] */ long __RPC_FAR *pxLeft,
+      /* [out] */ long __RPC_FAR *pyTop,
+      /* [out] */ long __RPC_FAR *pcxWidth,
+      /* [out] */ long __RPC_FAR *pcyHeight,
+      /* [optional][in] */ VARIANT varChild) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id] */ HRESULT STDMETHODCALLTYPE accNavigate( 
+      /* [in] */ long navDir,
+      /* [optional][in] */ VARIANT varStart,
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarEndUpAt) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id] */ HRESULT STDMETHODCALLTYPE accHitTest( 
+      /* [in] */ long xLeft,
+      /* [in] */ long yTop,
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarChild) override;
+
+
+  virtual /* [id] */ HRESULT STDMETHODCALLTYPE accDoDefaultAction( 
+      /* [optional][in] */ VARIANT varChild) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propput] */ HRESULT STDMETHODCALLTYPE put_accName( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [in] */ BSTR szName) override
+    { return E_NOTIMPL; }
+
+
+  virtual /* [id][propput] */ HRESULT STDMETHODCALLTYPE put_accValue( 
+      /* [optional][in] */ VARIANT varChild,
+      /* [in] */ BSTR szValue) override
+    { return E_NOTIMPL; }
+
+
+  // IDispatch (support of scripting languages like VB)
+  virtual HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT *pctinfo) override
+    { return E_NOTIMPL; }
+
+
+  virtual HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT iTInfo, LCID lcid,
+                                                ITypeInfo **ppTInfo) override
+    { return E_NOTIMPL; }
+
+
+  virtual HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID riid,
+                                                  LPOLESTR *rgszNames,
+                                                  UINT cNames,
+                                                  LCID lcid,
+                                                  DISPID *rgDispId) override
+    { return E_NOTIMPL; }
+
+
+  virtual HRESULT STDMETHODCALLTYPE Invoke(DISPID dispIdMember, REFIID riid,
+                                           LCID lcid, WORD wFlags,
+                                           DISPPARAMS *pDispParams,
+                                           VARIANT *pVarResult,
+                                           EXCEPINFO *pExcepInfo,
+                                           UINT *puArgErr) override
+    { return E_NOTIMPL; }
+
+
 
   static HRESULT Create(HANDLE aEvent, REFIID riid, void** ppv);
 
 private:
-  TestImp(HANDLE aEvent);
-  virtual ~TestImp();
+  explicit TestAccessible(HANDLE aEvent);
+  virtual ~TestAccessible();
 
 private:
-  ULONG mRefCnt;
-  HANDLE mEvent;
+  ULONG   mRefCnt;
+  HANDLE  mEvent;
 };
 
-TestImp::TestImp(HANDLE aEvent)
-  : mEvent(aEvent)
+TestAccessible::TestAccessible(HANDLE aEvent)
+  : mRefCnt(1)
+  , mEvent(aEvent)
 {
 }
 
-TestImp::~TestImp()
+TestAccessible::~TestAccessible()
 {
 }
 
 HRESULT
-TestImp::Create(HANDLE aEvent, REFIID riid, void** ppv)
+TestAccessible::Create(HANDLE aEvent, REFIID riid, void** ppv)
 {
   if (!ppv) {
     return E_INVALIDARG;
   }
   *ppv = nullptr;
-  TestImp* imp = new TestImp(aEvent);
+  TestAccessible* imp = new TestAccessible(aEvent);
   if (!imp) {
     return E_OUTOFMEMORY;
   }
@@ -83,34 +236,38 @@ TestImp::Create(HANDLE aEvent, REFIID riid, void** ppv)
 }
 
 HRESULT
-TestImp::QueryInterface(REFIID riid, void** ppv)
+TestAccessible::QueryInterface(REFIID riid, void** ppv)
 {
   IUnknown* punk = nullptr;
   if (!ppv) {
     return E_INVALIDARG;
   }
+
   if (riid == IID_IUnknown) {
     punk = static_cast<IUnknown*>(this);
-  } else if (riid == IID_ITest) {
-    punk = static_cast<ITest*>(this);
+  } else if (riid == IID_IDispatch) {
+    punk = static_cast<IDispatch*>(this);
+  } else if (riid == IID_IAccessible) {
+    punk = static_cast<IAccessible*>(this);
   }
 
   *ppv = punk;
   if (!punk) {
     return E_NOINTERFACE;
   }
+
   punk->AddRef();
   return S_OK;
 }
 
 ULONG
-TestImp::AddRef()
+TestAccessible::AddRef()
 {
   return (ULONG) InterlockedIncrement((LONG*)&mRefCnt);
 }
 
 ULONG
-TestImp::Release()
+TestAccessible::Release()
 {
   ULONG newRefCnt = (ULONG) InterlockedDecrement((LONG*)&mRefCnt);
   if (newRefCnt == 0) {
@@ -119,12 +276,16 @@ TestImp::Release()
   return newRefCnt;
 }
 
-HRESULT
-TestImp::Foo(long aParam, long* aOutVal)
+HRESULT STDMETHODCALLTYPE
+TestAccessible::accHitTest( 
+      /* [in] */ long xLeft,
+      /* [in] */ long yTop,
+      /* [retval][out] */ VARIANT __RPC_FAR *pvarChild)
 {
-  *aOutVal = 0xdeadbeef;
-  ::SetEvent(mEvent);
-  return aParam == 7 ? S_OK : E_INVALIDARG;
+  bool inOk = xLeft == 7 && yTop == 248;
+  pvarChild->vt = VT_I4;
+  pvarChild->lVal = CHILDID_SELF;
+  return inOk ? S_OK : E_FAIL;
 }
 
 const WCHAR gSectionName[] = L"comtest-shm";
@@ -176,7 +337,7 @@ COMTestSandbox::OnPrivInit()
 
   // Get the CLSID of the proxy/stub marshaler DLL
   CLSID psClsid;
-  HRESULT hr = ::CoGetPSClsid(IID_ITest, &psClsid);
+  HRESULT hr = ::CoGetPSClsid(IID_IAccessible, &psClsid);
   if (FAILED(hr)) {
     return false;
   }
@@ -217,11 +378,11 @@ COMTestSandbox::OnInit()
   if (!callEvent) {
     return false;
   }
-  ITestPtr test;
-  if (FAILED(TestImp::Create(callEvent.get(), IID_ITest, (void**)&test))) {
+  IAccessiblePtr test;
+  if (FAILED(TestAccessible::Create(callEvent.get(), IID_IAccessible, (void**)&test))) {
     return false;
   }
-  mozilla::ProxyStream outStream(IID_ITest, test);
+  mozilla::ProxyStream outStream(IID_IAccessible, test);
   if (!outStream.IsValid()) {
     return false;
   }
@@ -297,18 +458,19 @@ int wmain(int argc, wchar_t* argv[])
       return EXIT_FAILURE;
     }
 
-    ITestPtr test;
-    if (!stream.GetInterface(IID_ITest, (void**)&test)) {
+    IAccessiblePtr test;
+    if (!stream.GetInterface(IID_IAccessible, (void**)&test)) {
       wcout << L"ProxyStream::GetInterface failed" << endl;
       return EXIT_FAILURE;
     }
 
-    long outVal = 0;
-    HRESULT hr = test->Foo(7, &outVal);
-    if (FAILED(hr) || outVal != 0xdeadbeef) {
-      wcout << L"ITest::Foo failed" << endl;
+    VARIANT outVal;
+    HRESULT hr = test->accHitTest(7, 248, &outVal);
+    if (FAILED(hr) || outVal.vt != VT_I4 || outVal.lVal != CHILDID_SELF) {
+      wcout << L"IAccessible::accHitTest failed" << endl;
       return EXIT_FAILURE;
     }
+    wcout << L"IAccessible::accHitTest succeeded!" << endl;
 
     if (!sboxLauncher.Wait(INFINITE)) {
       return EXIT_FAILURE;
