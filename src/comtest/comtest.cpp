@@ -285,6 +285,7 @@ TestAccessible::accHitTest(
   bool inOk = xLeft == 7 && yTop == 248;
   pvarChild->vt = VT_I4;
   pvarChild->lVal = CHILDID_SELF;
+  ::SetEvent(mEvent);
   return inOk ? S_OK : E_FAIL;
 }
 
@@ -449,7 +450,7 @@ int wmain(int argc, wchar_t* argv[])
       return EXIT_FAILURE;
     }
 
-    mozilla::MTARegion mtargn;
+    mozilla::STARegion mtargn;
 
     // OK, we should have bytes of the interface
     mozilla::ProxyStream stream(sharedBuf->mData, sharedBuf->mLen);
