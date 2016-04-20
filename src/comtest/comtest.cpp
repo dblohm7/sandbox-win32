@@ -20,12 +20,14 @@
 
 #include "comarshal.h"
 #include "mscom.h"
+#include "handoff.h"
 
 using std::wcout;
 using std::wcerr;
 using std::endl;
 using std::wostringstream;
 using mozilla::WindowsSandboxLauncher;
+using mozilla::mscom::Handoff;
 
 namespace {
 
@@ -277,7 +279,7 @@ TestAccessible::Release()
 }
 
 HRESULT STDMETHODCALLTYPE
-TestAccessible::accHitTest( 
+TestAccessible::accHitTest(
       /* [in] */ long xLeft,
       /* [in] */ long yTop,
       /* [retval][out] */ VARIANT __RPC_FAR *pvarChild)
@@ -383,7 +385,12 @@ COMTestSandbox::OnInit()
   if (FAILED(TestAccessible::Create(callEvent.get(), IID_IAccessible, (void**)&test))) {
     return false;
   }
-  mozilla::ProxyStream outStream(IID_IAccessible, test);
+  IAccessiblePtr replacement;
+  if (FAILED(Handoff::WrapInterface<IAccessible>(::GetCurrentThread(), test,
+                                                 &replacement))) {
+    return false;
+  }
+  mozilla::ProxyStream outStream(IID_IAccessible, replacement);
   if (!outStream.IsValid()) {
     return false;
   }
@@ -391,7 +398,8 @@ COMTestSandbox::OnInit()
   const char* buf = outStream.GetBuffer(len);
   mSharedBuffer->mLen = len;
   memcpy(&mSharedBuffer->mData[0], buf, len);
-  ::SignalObjectAndWait(mEvent.get(), callEvent.get(), INFINITE, FALSE);
+  ::SetEvent(mEvent.get());
+  while (::WaitForSingleObjectEx(callEvent.get(), INFINITE, TRUE) != WAIT_OBJECT_0) {}
   return true;
 }
 
