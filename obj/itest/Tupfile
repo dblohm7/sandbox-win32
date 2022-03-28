@@ -1,3 +1,3 @@
 .gitignore
-: ../../src/itest/Test.idl |> midl -win32 -Oicf %f |> %B.h %B_p.c %B_i.c dlldata.c
-: foreach *.c | Test.h |> cl -Zi -EHsc -MD -DWIN32 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -DREGISTER_PROXY_DLL -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb
+: ../../src/itest/Test.idl |> midl -nologo -x64 -Oicf %f |> %B.h %B_p.c %B_i.c dlldata.c
+: foreach *.c | Test.h |> cl -nologo -Zi -EHsc -MD -DWIN32 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -DREGISTER_PROXY_DLL -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb

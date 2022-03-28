@@ -12,8 +12,8 @@
 namespace mozilla {
 
 Dacl::Dacl()
-  :mAcl(nullptr),
-   mModified(false)
+  : mAcl(nullptr),
+    mModified(false)
 {
 }
 
@@ -75,6 +75,7 @@ Dacl::Merge(PACL aAcl)
   if (ERROR_SUCCESS != err) {
     return false;
   }
+
   Clear();
   mAcl = newAcl;
   mModified = false;

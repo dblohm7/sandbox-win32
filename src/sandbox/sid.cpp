@@ -21,14 +21,14 @@ Sid Sid::sIntegrityHigh;
 Sid Sid::sIntegritySystem;
 
 Sid::Sid()
-  :mSid(nullptr),
-   mSelfAllocated(false)
+  : mSid(nullptr),
+    mSelfAllocated(false)
 {
 }
 
 Sid::Sid(const Sid& aOther)
-  :mSid(nullptr),
-   mSelfAllocated(false)
+  : mSid(nullptr),
+    mSelfAllocated(false)
 {
   *this = aOther;
 }
@@ -75,7 +75,7 @@ Sid::Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1, DWORD aRid2
   BOOL result = ::AllocateAndInitializeSid(&aAuth, numSubAuthorities, aRid0,
                                            aRid1, aRid2, aRid3, aRid4, aRid5,
                                            aRid6, aRid7, &mSid);
-  return result ? true : false;
+  return !!result;
 }
 
 bool
@@ -86,11 +86,13 @@ Sid::Init(WELL_KNOWN_SID_TYPE aSidType)
       ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
+
   PSID newSid = (PSID) ::calloc(newSidLen, 1);
   if (!::CreateWellKnownSid(aSidType, nullptr, newSid, &newSidLen)) {
     ::free(newSid);
     return false;
   }
+
   mSid = newSid;
   mSelfAllocated = true;
   return true;
@@ -99,13 +101,17 @@ Sid::Init(WELL_KNOWN_SID_TYPE aSidType)
 bool
 Sid::Init(const PSID aSid)
 {
-  if (mSid || !aSid || !::IsValidSid(aSid)) return false;
+  if (mSid || !aSid || !::IsValidSid(aSid)) {
+    return false;
+  }
+
   DWORD len = ::GetLengthSid(aSid);
   PSID newSid = ::calloc(len, 1);
   if (!::CopySid(len, newSid, aSid)) {
     ::free(newSid);
     return false;
   }
+
   mSid = newSid;
   mSelfAllocated = true;
   return true;
@@ -118,6 +124,7 @@ Sid::InitCustom()
   if (::UuidCreate(&uuid) != RPC_S_OK) {
     return false;
   }
+
   DWORD *subAuth = (DWORD*) &uuid;
   SID_IDENTIFIER_AUTHORITY auth = SECURITY_RESOURCE_MANAGER_AUTHORITY;
   return Init(auth, subAuth[0], subAuth[1], subAuth[2], subAuth[3]);
@@ -129,6 +136,7 @@ Sid::GetTrustee(TRUSTEE& aTrustee) const
   if (!mSid) {
     return;
   }
+
   ::BuildTrusteeWithSid(&aTrustee, mSid);
 }
 
@@ -138,6 +146,7 @@ Sid::operator==(PSID aOther) const
   if (!IsValid() || !aOther || !::IsValidSid(aOther)) {
     return false;
   }
+
   return !!::EqualSid(mSid, aOther);
 }
 
@@ -147,6 +156,7 @@ Sid::operator==(const Sid& aOther) const
   if (!IsValid() || !aOther.IsValid()) {
     return false;
   }
+
   return !!::EqualSid(mSid, aOther.mSid);
 }
 
@@ -156,6 +166,7 @@ Sid::GetAdministrators()
   if (sAdministrators.IsValid()) {
     return sAdministrators;
   }
+
   sAdministrators.Init(WinBuiltinAdministratorsSid);
   return sAdministrators;
 }
@@ -166,6 +177,7 @@ Sid::GetLocalSystem()
   if (sLocalSystem.IsValid()) {
     return sLocalSystem;
   }
+
   sLocalSystem.Init(WinLocalSystemSid);
   return sLocalSystem;
 }
@@ -176,6 +188,7 @@ Sid::GetEveryone()
   if (sEveryone.IsValid()) {
     return sEveryone;
   }
+
   sEveryone.Init(WinWorldSid);
   return sEveryone;
 }
@@ -186,6 +199,7 @@ Sid::GetRestricted()
   if (sRestricted.IsValid()) {
     return sRestricted;
   }
+
   sRestricted.Init(WinRestrictedCodeSid);
   return sRestricted;
 }
@@ -196,6 +210,7 @@ Sid::GetUsers()
   if (sUsers.IsValid()) {
     return sUsers;
   }
+
   sUsers.Init(WinBuiltinUsersSid);
   return sUsers;
 }
@@ -206,6 +221,7 @@ Sid::GetIntegrityUntrusted()
   if (sIntegrityUntrusted.IsValid()) {
     return sIntegrityUntrusted;
   }
+
   sIntegrityUntrusted.Init(WinUntrustedLabelSid);
   return sIntegrityUntrusted;
 }
@@ -216,6 +232,7 @@ Sid::GetIntegrityLow()
   if (sIntegrityLow.IsValid()) {
     return sIntegrityLow;
   }
+
   sIntegrityLow.Init(WinLowLabelSid);
   return sIntegrityLow;
 }
@@ -226,6 +243,7 @@ Sid::GetIntegrityMedium()
   if (sIntegrityMedium.IsValid()) {
     return sIntegrityMedium;
   }
+
   sIntegrityMedium.Init(WinMediumLabelSid);
   return sIntegrityMedium;
 }
@@ -236,6 +254,7 @@ Sid::GetIntegrityHigh()
   if (sIntegrityHigh.IsValid()) {
     return sIntegrityHigh;
   }
+
   sIntegrityHigh.Init(WinHighLabelSid);
   return sIntegrityHigh;
 }
@@ -246,6 +265,7 @@ Sid::GetIntegritySystem()
   if (sIntegritySystem.IsValid()) {
     return sIntegritySystem;
   }
+
   sIntegritySystem.Init(WinSystemLabelSid);
   return sIntegritySystem;
 }

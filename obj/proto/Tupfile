@@ -8,4 +8,4 @@ ifndef DEINIT_FUNCTION
 DEINIT_FUNCTION=DeinitializeCdmModule
 endif
 
-: foreach ../../src/proto/*.cpp |> cl -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -DINIT_FUNCTION_NAME="\"$(INIT_FUNCTION)\"" -DDEINIT_FUNCTION_NAME="\"$(DEINIT_FUNCTION)\"" -I../../include -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb
+: foreach ../../src/proto/*.cpp |> cl -nologo -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -DINIT_FUNCTION_NAME="\"$(INIT_FUNCTION)\"" -DDEINIT_FUNCTION_NAME="\"$(DEINIT_FUNCTION)\"" -I../../include -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb

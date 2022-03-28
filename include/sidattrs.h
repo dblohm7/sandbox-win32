@@ -22,8 +22,10 @@ public:
     FILTER_RESTRICTED_DISABLE = 2,
     FILTER_ADD_RESTRICTED = 4
   };
+
   bool CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
                              Sid* aLogonSid = nullptr);
+
   size_t Count() const { return mSidAttrs.size(); }
   operator PSID_AND_ATTRIBUTES() { return &mSidAttrs[0]; }
 

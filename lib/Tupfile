@@ -1,2 +1,2 @@
 .gitignore
-: ../obj/sandbox/*.obj |> lib %f -out:sandbox.lib |> sandbox.lib
+: ../obj/sandbox/*.obj |> lib -nologo %f -out:sandbox.lib |> sandbox.lib

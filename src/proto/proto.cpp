@@ -48,7 +48,7 @@ class PrototypeSandbox : public WindowsSandbox
 public:
   explicit PrototypeSandbox(const wchar_t *aLibPath)
     :mLibPath(aLibPath),
-     mLib(NULL),
+     mLib(nullptr),
      mDeinit(nullptr)
   {}
   virtual ~PrototypeSandbox() {}
@@ -66,7 +66,7 @@ private:
 bool
 PrototypeSandbox::OnPrivInit()
 {
-  HMODULE vlib = ::LoadLibraryEx(mLibPath, NULL,
+  HMODULE vlib = ::LoadLibraryEx(mLibPath, nullptr,
                                  LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE);
   if (!vlib) {
     return false;
@@ -103,7 +103,7 @@ PrototypeSandbox::OnFini()
   }
   if (mLib) {
     ::FreeLibrary(mLib);
-    mLib = NULL;
+    mLib = nullptr;
   }
 }
 

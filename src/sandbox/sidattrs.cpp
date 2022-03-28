@@ -16,17 +16,21 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
   if (!aToken || !mSidAttrs.empty() || !mSids.empty()) {
     return false;
   }
+
   // Get size
   DWORD reqdLen = 0;
   if (!::GetTokenInformation(aToken, TokenGroups, nullptr, 0, &reqdLen) &&
       ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
     return false;
   }
+
+  // Allocate and retrieve
   MAKE_UNIQUE_LEN(PTOKEN_GROUPS, tokenGroups, reqdLen);
   if (!::GetTokenInformation(aToken, TokenGroups, tokenGroups, reqdLen,
                              &reqdLen)) {
     return false;
   }
+
   // Pass 1: Figure out how many SID_AND_ATTRIBUTES we need
   DWORD sidCount = 0;
   for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
@@ -52,21 +56,25 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
     }
     ++sidCount;
   }
+
   if (aFilterFlags & FILTER_ADD_RESTRICTED) {
     ++sidCount;
   }
+
   // Reserve space in the containers so that the vector's buffers don't get
   // reallocated.
   mSidAttrs.reserve(sidCount);
   mSids.reserve(sidCount);
-  DWORD sidIndex = 0;
+
   // Pass 2: Now populate the output
+  DWORD sidIndex = 0;
   for (DWORD i = 0; i < tokenGroups->GroupCount; ++i) {
     if (tokenGroups->Groups[i].Attributes & SE_GROUP_INTEGRITY) {
       if (aFilterFlags & FILTER_INTEGRITY) {
         continue;
       }
     }
+
     if (tokenGroups->Groups[i].Attributes & SE_GROUP_LOGON_ID) {
       if (aLogonSid) {
         aLogonSid->Init(tokenGroups->Groups[i].Sid);
@@ -75,25 +83,31 @@ SidAttributes::CreateFromTokenGroups(HANDLE aToken, unsigned int aFilterFlags,
         continue;
       }
     }
+
     if (mozilla::Sid::GetEveryone() == tokenGroups->Groups[i].Sid) {
       if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
         continue;
       }
     }
+
     if (mozilla::Sid::GetUsers() == tokenGroups->Groups[i].Sid) {
       if (aFilterFlags & FILTER_RESTRICTED_DISABLE) {
         continue;
       }
     }
+
     Sid newSid;
     if (!newSid.Init(tokenGroups->Groups[i].Sid)) {
       return false;
     }
+
     Push(newSid);
   }
+
   if (aFilterFlags & FILTER_ADD_RESTRICTED) {
     Push(mozilla::Sid::GetRestricted());
   }
+
   return true;
 }
 

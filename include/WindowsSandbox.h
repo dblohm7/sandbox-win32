@@ -15,8 +15,6 @@
 
 namespace mozilla {
 
-typedef UNIQUE_HANDLE_TYPE(HANDLE, &::CloseHandle) ScopedHandle;
-
 class WindowsSandbox
 {
 public:
@@ -79,19 +77,18 @@ private:
                      unsigned int& aNumSidAttrs, unsigned int aFilterFlags,
                      mozilla::Sid* aLogonSid = nullptr);
   void FreeSidList(SID_AND_ATTRIBUTES* aListToFree);
-  bool CreateTokens(const Sid& aCustomSid, ScopedHandle& aRestrictedToken,
-                    ScopedHandle& aImpersonationToken, Sid& aLogonSid);
+  bool CreateTokens(const Sid& aCustomSid, UniqueKernelHandle& aRestrictedToken,
+                    UniqueKernelHandle& aImpersonationToken, Sid& aLogonSid);
   HWINSTA CreateWindowStation();
   std::unique_ptr<wchar_t[]> GetWindowStationName(HWINSTA aWinsta);
   HDESK CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid);
-  bool CreateJob(ScopedHandle& aJob);
-  bool GetWorkingDirectory(ScopedHandle& aToken, wchar_t* aBuf, size_t aBufLen);
+  bool CreateJob(UniqueKernelHandle& aJob);
+  bool GetWorkingDirectory(UniqueKernelHandle& aToken, wchar_t* aBuf, size_t aBufLen);
   std::unique_ptr<wchar_t[]> CreateAbsolutePath(const wchar_t* aInputPath);
   bool BuildInheritableSecurityDescriptor(const Sid& aLogonSid);
 
   InitFlags mInitFlags;
   std::vector<HANDLE> mHandlesToInherit;
-  bool    mHasWinVistaAPIs;
   bool    mHasWin8APIs;
   bool    mHasWin10APIs;
   DWORD64 mMitigationPolicies;

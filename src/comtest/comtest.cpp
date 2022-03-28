@@ -298,9 +298,6 @@ class COMTestSandbox : public mozilla::WindowsSandbox
 {
 public:
   explicit COMTestSandbox()
-    : mSection(nullptr, &::CloseHandle)
-    , mSharedBuffer(nullptr, &::UnmapViewOfFile)
-    , mEvent(nullptr, &::CloseHandle)
   {}
   virtual ~COMTestSandbox()
   {
@@ -313,9 +310,10 @@ protected:
   virtual void OnFini();
 
 private:
-  UniqueKernelHandle      mSection;
-  UniqueFileMapping<BufDescriptor> mSharedBuffer;
-  UniqueKernelHandle      mEvent;
+  UniqueKernelHandle                  mSection;
+  UniqueMappedFileView<BufDescriptor> mSharedBuffer;
+
+  UniqueKernelHandle                  mEvent;
 };
 
 bool
@@ -377,7 +375,7 @@ COMTestSandbox::OnInit()
     return false;
   }
 
-  MAKE_UNIQUE_KERNEL_HANDLE(callEvent, ::CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  UniqueKernelHandle callEvent(::CreateEvent(nullptr, FALSE, FALSE, nullptr));
   if (!callEvent) {
     return false;
   }
@@ -411,9 +409,8 @@ COMTestSandbox::OnFini()
 
 }
 
-// TODO: Remove these from global scope
-static UniqueKernelHandle gSection(nullptr, &CloseHandle);
-static UniqueKernelHandle gEvent(nullptr, &CloseHandle);
+static UniqueKernelHandle gSection;
+static UniqueKernelHandle gEvent;
 static const DWORD SHM_TIMEOUT = 10000U;
 
 static BufDescriptor*
@@ -441,8 +438,7 @@ int wmain(int argc, wchar_t* argv[])
       return EXIT_FAILURE;
     }
 
-    UniqueFileMapping<BufDescriptor> sharedBuf(CreateSharedSection(),
-                                               &UnmapViewOfFile);
+    UniqueMappedFileView<BufDescriptor> sharedBuf(CreateSharedSection());
     if (!sharedBuf) {
       wcout << L"Failed to create shared section data" << endl;
       return EXIT_FAILURE;
