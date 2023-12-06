@@ -690,16 +690,18 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   }
 
   // 8. Create the process using the restricted token
-  STARTUPINFOEX siex;
-  ZeroMemory(&siex, sizeof(siex));
+  std::wstring desktop;
   if (mWinsta) {
     auto winstaName = GetWindowStationName(mWinsta);
-    std::wostringstream ssDesktop;
-    ssDesktop << winstaName.get() << L"\\" << WindowsSandbox::DESKTOP_NAME;
-    siex.StartupInfo.lpDesktop = (LPWSTR)ssDesktop.str().c_str();
-  } else {
-    siex.StartupInfo.lpDesktop = (LPWSTR)WindowsSandbox::DESKTOP_NAME;
+    if (winstaName) {
+      desktop = winstaName.get();
+      desktop += L"\\";
+    }
   }
+  desktop += WindowsSandbox::DESKTOP_NAME;
+
+  STARTUPINFOEX siex = {};
+  siex.StartupInfo.lpDesktop = (LPWSTR)desktop.c_str();
 
   DWORD creationFlags = CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT;
   siex.StartupInfo.cb = sizeof(STARTUPINFOEX);
