@@ -12,19 +12,22 @@
 
 namespace mozilla {
 
-class Sid
+class Sid final
 {
 public:
   Sid();
+  explicit Sid(const WELL_KNOWN_SID_TYPE aSidType);
   Sid(const Sid& aOther);
+  Sid(Sid&& aOther);
   ~Sid();
 
   Sid& operator=(const Sid& aOther);
+  Sid& operator=(Sid&& aOther);
 
   bool Init(SID_IDENTIFIER_AUTHORITY& aAuth, DWORD aRid0, DWORD aRid1 = 0,
             DWORD aRid2 = 0, DWORD aRid3 = 0, DWORD aRid4 = 0, DWORD aRid5 = 0,
             DWORD aRid6 = 0, DWORD aRid7 = 0);
-  bool Init(WELL_KNOWN_SID_TYPE aSidType);
+  bool Init(const WELL_KNOWN_SID_TYPE aSidType);
   bool Init(const PSID aSid);
 
   bool InitCustom();
@@ -36,33 +39,22 @@ public:
   bool operator== (PSID aOther) const;
   bool operator== (const Sid& aOther) const;
 
-  static Sid& GetAdministrators();
-  static Sid& GetLocalSystem();
-  static Sid& GetEveryone();
-  static Sid& GetRestricted();
-  static Sid& GetUsers();
-  static Sid& GetIntegrityUntrusted();
-  static Sid& GetIntegrityLow();
-  static Sid& GetIntegrityMedium();
-  static Sid& GetIntegrityHigh();
-  static Sid& GetIntegritySystem();
+  static const Sid& GetAdministrators();
+  static const Sid& GetLocalSystem();
+  static const Sid& GetEveryone();
+  static const Sid& GetRestricted();
+  static const Sid& GetUsers();
+  static const Sid& GetIntegrityUntrusted();
+  static const Sid& GetIntegrityLow();
+  static const Sid& GetIntegrityMedium();
+  static const Sid& GetIntegrityHigh();
+  static const Sid& GetIntegritySystem();
 
 private:
   void Clear();
 
   PSID          mSid;
   bool          mSelfAllocated;
-
-  static Sid sAdministrators;
-  static Sid sLocalSystem;
-  static Sid sEveryone;
-  static Sid sRestricted;
-  static Sid sUsers;
-  static Sid sIntegrityUntrusted;
-  static Sid sIntegrityLow;
-  static Sid sIntegrityMedium;
-  static Sid sIntegrityHigh;
-  static Sid sIntegritySystem;
 };
 
 } // namespace mozilla

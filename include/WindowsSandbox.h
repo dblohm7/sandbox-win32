@@ -11,6 +11,10 @@
 #include "Dacl.h"
 #include "Sid.h"
 #include "UniqueHandle.h"
+
+#include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace mozilla {
@@ -24,9 +28,8 @@ public:
   bool Init(int aArgc, wchar_t* aArgv[]);
   void Fini();
 
-  static const wchar_t DESKTOP_NAME[];
-  static const wchar_t SWITCH_IMPERSONATION_TOKEN_HANDLE[];
-  static const wchar_t SWITCH_JOB_HANDLE[];
+  static const std::wstring DESKTOP_NAME;
+  static const std::wstring_view SWITCH_JOB_HANDLE;
 
 protected:
   virtual DWORD64 GetDeferredMitigationPolicies() { return 0; }
@@ -61,7 +64,7 @@ public:
       mHandlesToInherit.push_back(aHandle);
     }
   }
-  bool Launch(const wchar_t* aExecutablePath, const wchar_t* aBaseCmdLine);
+  bool Launch(const std::wstring_view aExecutablePath, const std::wstring_view aBaseCmdLine);
   bool Wait(unsigned int aTimeoutMs) const;
   bool IsSandboxRunning() const;
   bool GetInheritableSecurityDescriptor(SECURITY_ATTRIBUTES& aSa,
@@ -73,18 +76,14 @@ protected:
   virtual bool PreResume() { return true; }
 
 private:
-  bool CreateSidList(HANDLE aToken, SID_AND_ATTRIBUTES*& aOutput,
-                     unsigned int& aNumSidAttrs, unsigned int aFilterFlags,
-                     mozilla::Sid* aLogonSid = nullptr);
-  void FreeSidList(SID_AND_ATTRIBUTES* aListToFree);
   bool CreateTokens(const Sid& aCustomSid, UniqueKernelHandle& aRestrictedToken,
                     UniqueKernelHandle& aImpersonationToken, Sid& aLogonSid);
   HWINSTA CreateWindowStation();
-  std::unique_ptr<wchar_t[]> GetWindowStationName(HWINSTA aWinsta);
+  std::optional<std::wstring> GetWindowStationName(HWINSTA aWinsta);
   HDESK CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid);
   bool CreateJob(UniqueKernelHandle& aJob);
-  bool GetWorkingDirectory(UniqueKernelHandle& aToken, wchar_t* aBuf, size_t aBufLen);
-  std::unique_ptr<wchar_t[]> CreateAbsolutePath(const wchar_t* aInputPath);
+  std::optional<std::wstring> GetWorkingDirectory(UniqueKernelHandle& aToken);
+  std::optional<std::wstring> CreateAbsolutePath(const std::wstring_view aInputPath);
   bool BuildInheritableSecurityDescriptor(const Sid& aLogonSid);
 
   InitFlags mInitFlags;

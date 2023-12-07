@@ -12,9 +12,11 @@
 
 namespace mozilla {
 
-class SidAttributes
+class SidAttributes final
 {
 public:
+  SidAttributes() = default;
+
   enum SidListFilterFlag
   {
     FILTER_NOTHING = 0,
@@ -28,6 +30,11 @@ public:
 
   size_t Count() const { return mSidAttrs.size(); }
   operator PSID_AND_ATTRIBUTES() { return &mSidAttrs[0]; }
+
+  SidAttributes(const SidAttributes&) = delete;
+  SidAttributes(SidAttributes&&) = delete;
+  SidAttributes& operator=(const SidAttributes&) = delete;
+  SidAttributes& operator=(SidAttributes&&) = delete;
 
 private:
   void Push(const Sid& aSid, const DWORD aAttrs = 0);

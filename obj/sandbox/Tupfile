@@ -1,2 +1,2 @@
 .gitignore
-: foreach ../../src/sandbox/*.cpp |> cl -nologo -Zi -EHsc -MD -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -I../../include -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb
+: foreach ../../src/sandbox/*.cpp |> cl -nologo -Zi -EHsc -MD -std:c++17 -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE -I../../include -c %f -Fd%B.pdb -Fo%o |> %B.obj | %B.pdb

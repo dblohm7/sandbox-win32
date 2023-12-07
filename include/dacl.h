@@ -16,7 +16,7 @@ namespace mozilla {
 
 class Sid;
 
-class Dacl
+class Dacl final
 {
 public:
   Dacl();
@@ -29,6 +29,12 @@ public:
   bool Merge(PACL aAcl);
 
   operator PACL();
+  explicit operator bool() { return (PACL)(*this) != nullptr; }
+
+  Dacl(const Dacl&) = delete;
+  Dacl(Dacl&&) = delete;
+  Dacl& operator=(const Dacl&) = delete;
+  Dacl& operator=(Dacl&&) = delete;
 
 private:
   void AddAce(const Sid& aSid, ACCESS_MODE aAccessMode, ACCESS_MASK aAccessMask);

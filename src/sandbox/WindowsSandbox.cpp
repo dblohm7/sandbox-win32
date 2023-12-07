@@ -10,20 +10,24 @@
 #include "MakeUniqueLen.h"
 #include "sidattrs.h"
 #include <sstream>
+#include <string_view>
 
 #include <aclapi.h>
+#include <pathcch.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <VersionHelpers.h>
 
+using namespace ::std::literals::string_literals;
+using namespace ::std::literals::string_view_literals;
 using std::wistringstream;
 using std::wostringstream;
 using std::hex;
 
 namespace mozilla {
 
-const wchar_t WindowsSandbox::DESKTOP_NAME[] = L"moz-sandbox";
-const wchar_t WindowsSandbox::SWITCH_JOB_HANDLE[] = L"--job";
+const std::wstring WindowsSandbox::DESKTOP_NAME = L"moz-sandbox"s;
+const std::wstring_view WindowsSandbox::SWITCH_JOB_HANDLE = L"--job"sv;
 
 bool
 WindowsSandbox::DropProcessIntegrityLevel()
@@ -164,7 +168,7 @@ WindowsSandbox::Init(int aArgc, wchar_t* aArgv[])
 {
   UniqueKernelHandle job;
   for (int i = 1; i < aArgc; ++i) {
-    if (!::wcscmp(aArgv[i], SWITCH_JOB_HANDLE) && i + 1 < aArgc) {
+    if (SWITCH_JOB_HANDLE == aArgv[i] && i + 1 < aArgc) {
       uintptr_t uijob;
       std::wistringstream iss(aArgv[++i]);
       iss >> hex >> uijob;
@@ -330,15 +334,27 @@ WindowsSandboxLauncher::CreateWindowStation()
   return winsta;
 }
 
-std::unique_ptr<wchar_t[]>
+std::optional<std::wstring>
 WindowsSandboxLauncher::GetWindowStationName(HWINSTA aWinsta)
 {
-  DWORD len = 0;
-  ::GetUserObjectInformation(aWinsta, UOI_NAME, nullptr, len, &len);
-  auto name(std::make_unique<wchar_t[]>(len));
-  if (!::GetUserObjectInformation(aWinsta, UOI_NAME, name.get(), len, &len)) {
-    return nullptr;
+  DWORD lenBytes = 0;
+  if (!::GetUserObjectInformation(aWinsta, UOI_NAME, nullptr, lenBytes, &lenBytes) &&
+      ::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+    return {};
   }
+
+  auto name = std::make_optional<std::wstring>(
+      static_cast<std::wstring::size_type>((lenBytes+1)/sizeof(std::wstring::value_type)),
+      std::wstring::value_type(0));
+  if (!::GetUserObjectInformation(aWinsta, UOI_NAME, name.value().data(),
+                                  name.value().length() * sizeof(std::wstring::value_type),
+                                  nullptr)) {
+    return {};
+  }
+
+  // Chop off terminator
+  name.value().pop_back();
+
   return name;
 }
 
@@ -433,13 +449,13 @@ WindowsSandboxLauncher::CreateDesktop(HWINSTA aWinsta, const Sid& aCustomSid)
 
   // 3f. Create the new desktop using the absolute security descriptor
   SECURITY_ATTRIBUTES newDesktopSa = {sizeof(newDesktopSa), curDesktopSd, FALSE};
-  HDESK desktop = ::CreateDesktop(WindowsSandbox::DESKTOP_NAME, nullptr,
+  HDESK desktop = ::CreateDesktop(WindowsSandbox::DESKTOP_NAME.c_str(), nullptr,
                                   nullptr, 0, DESKTOP_CREATEWINDOW,
                                   &newDesktopSa);
   // 3g. Revert to our previous window station
   if (aWinsta) {
     if (!::SetProcessWindowStation(curWinsta)) {
-      // uh-oh! we should warn!
+      return nullptr;
     }
   }
 
@@ -550,46 +566,42 @@ WindowsSandboxLauncher::IsSandboxRunning() const
   return mProcess && ::WaitForSingleObject(mProcess, 0) == WAIT_TIMEOUT;
 }
 
-bool
-WindowsSandboxLauncher::GetWorkingDirectory(UniqueKernelHandle& aToken,
-                                            wchar_t* aBuf, size_t aBufCount)
+std::optional<std::wstring>
+WindowsSandboxLauncher::GetWorkingDirectory(UniqueKernelHandle& aToken)
 {
-  if (!aToken || !aBuf || !aBufCount) {
-    return false;
+  if (!aToken) {
+    return {};
   }
 
   PWSTR shWorkingDir = nullptr;
   if (FAILED(::SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0, aToken.get(),
                                     &shWorkingDir))) {
-    return false;
+    return {};
   }
   UniqueCOMAllocatedString shWorkingDirUniq(shWorkingDir);
 
-  if (::wcslen(shWorkingDir) > aBufCount - 1) {
-    return false;
-  }
-
-  ::wcsncpy(aBuf, shWorkingDir, aBufCount - 1);
-  return true;
+  return std::make_optional<std::wstring>(shWorkingDir);
 }
 
-std::unique_ptr<wchar_t[]>
-WindowsSandboxLauncher::CreateAbsolutePath(const wchar_t* aInputPath)
+std::optional<std::wstring>
+WindowsSandboxLauncher::CreateAbsolutePath(const std::wstring_view aInputPath)
 {
-  wchar_t buf[MAX_PATH + 1] = {0};
-  if (!_wfullpath(buf, aInputPath, ArrayLength(buf))) {
-    return nullptr;
+  wchar_t buf[MAX_PATH + 1] = {};
+  if (!_wfullpath(buf, std::wstring(aInputPath).c_str(), ArrayLength(buf))) {
+    return {};
   }
 
-  ::PathAddExtensionW(buf, nullptr);
-  auto result(std::make_unique<wchar_t[]>(wcslen(buf) + 1));
-  wcscpy(result.get(), buf);
-  return result;
+  HRESULT hr = ::PathCchAddExtension(buf, ArrayLength(buf), L"exe");
+  if (FAILED(hr)) {
+    return {};
+  }
+
+  return std::make_optional<std::wstring>(buf);
 }
 
 bool
-WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
-                               const wchar_t* aBaseCmdLine)
+WindowsSandboxLauncher::Launch(const std::wstring_view aExecutablePath,
+                               const std::wstring_view aBaseCmdLine)
 {
   auto absExePath = CreateAbsolutePath(aExecutablePath);
   if (!absExePath) {
@@ -628,18 +640,18 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
 
   // 5. Build the command line string
   wostringstream oss;
-  oss << absExePath.get();
-  oss << L" ";
+  oss << absExePath.value();
+  oss << L" "sv;
   oss << aBaseCmdLine;
-  oss << L" ";
+  oss << L" "sv;
   oss << WindowsSandbox::SWITCH_JOB_HANDLE;
-  oss << L" ";
+  oss << L" "sv;
   oss << hex << job.get();
 
   // 6. Set the working directory. With low integrity levels on Vista most
   //    directories are inaccessible.
-  wchar_t workingDir[MAX_PATH + 1] = {0};
-  if (!GetWorkingDirectory(restrictedToken, workingDir, ArrayLength(workingDir))) {
+  auto workingDir = GetWorkingDirectory(restrictedToken);
+  if (!workingDir) {
     return false;
   }
 
@@ -693,10 +705,11 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   std::wstring desktop;
   if (mWinsta) {
     auto winstaName = GetWindowStationName(mWinsta);
-    if (winstaName) {
-      desktop = winstaName.get();
-      desktop += L"\\";
+    if (!winstaName) {
+      return false;
     }
+    desktop = winstaName.value();
+    desktop += L"\\"sv;
   }
   desktop += WindowsSandbox::DESKTOP_NAME;
 
@@ -716,9 +729,9 @@ WindowsSandboxLauncher::Launch(const wchar_t* aExecutablePath,
   SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, FALSE};
 
   PROCESS_INFORMATION procInfo;
-  result = !!::CreateProcessAsUser(restrictedToken.get(), absExePath.get(),
+  result = !!::CreateProcessAsUser(restrictedToken.get(), absExePath.value().c_str(),
                                    const_cast<wchar_t*>(oss.str().c_str()), &sa,
-                                   &sa, TRUE, creationFlags, L"", workingDir,
+                                   &sa, TRUE, creationFlags, L"", workingDir.value().c_str(),
                                    &siex.StartupInfo, &procInfo);
 
   UniqueKernelHandle childProcess(procInfo.hProcess);
